@@ -354,6 +354,23 @@ st.markdown("""
     footer {visibility: hidden;}
     [data-testid="stToolbar"] {display: none;}
     
+    /* SIDEBAR SEMPRE APERTA - nasconde pulsante chiusura */
+    [data-testid="collapsedControl"] {display: none !important;}
+    button[kind="header"] {display: none !important;}
+    .css-1rs6os {display: none !important;}
+    .css-17ziqus {display: none !important;}
+    
+    /* Forza sidebar sempre visibile */
+    section[data-testid="stSidebar"] {
+        transform: none !important;
+        width: 21rem !important;
+        min-width: 21rem !important;
+    }
+    
+    section[data-testid="stSidebar"] > div {
+        width: 21rem !important;
+    }
+    
     /* Nascondi pulsanti fullscreen/expand sulle immagini */
     button[title="View fullscreen"] {display: none;}
     [data-testid="StyledFullScreenButton"] {display: none;}
