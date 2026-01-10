@@ -1,0 +1,593 @@
+"""
+🧮 PROBABILITY ENGINE - Motore di calcolo probabilità
+=====================================================
+Questo modulo contiene tutta la matematica per calcolare le probabilità:
+- Distribuzione Poisson univariata e bivariata
+- Correlazione Dixon-Coles (λ₃)
+- Calcolo 1X2, Over/Under, BTTS
+- Matrice punteggi esatti
+
+Autore: Sistema sviluppato con Peppe
+Versione: 2.0 (Gennaio 2025)
+"""
+
+import numpy as np
+from math import exp, factorial
+from typing import Dict, Tuple, Optional
+
+# ============================================================
+# PARAMETRI DEL MODELLO
+# ============================================================
+MAX_GOALS = 10          # Massimo gol per squadra nella matrice
+SOFT_ADJ_WEIGHT = 0.20  # Peso per aggiustamenti forma/rank/momentum
+
+# λ₃ calibrato empiricamente per ogni lega (correlazione gol)
+LEAGUE_LAMBDA3 = {
+    39:  0.08,   # Premier League (partite aperte)
+    135: 0.05,   # Serie A (tattica, meno gol correlati)
+    140: 0.05,   # LaLiga (possesso palla)
+    78:  0.10,   # Bundesliga (pressing alto, contropiedi)
+    61:  0.08,   # Ligue 1
+    94:  0.08,   # Primeira Liga
+    88:  0.08,   # Eredivisie
+}
+
+# Medie di lega di fallback (se non disponibili da API)
+DEFAULT_LEAGUE_AVG = {
+    "gf_home": 1.45,  # Gol fatti in casa (media europea)
+    "gf_away": 1.15,  # Gol fatti fuori casa
+}
+
+
+# ============================================================
+# FUNZIONI MATEMATICHE BASE
+# ============================================================
+
+def poisson_pmf(k: int, lam: float) -> float:
+    """
+    Funzione di massa di probabilità Poisson.
+    P(X = k) = e^(-λ) × λ^k / k!
+    
+    Args:
+        k: Numero di eventi (gol)
+        lam: Valore atteso (λ)
+    
+    Returns:
+        Probabilità che X = k
+    """
+    if lam <= 0:
+        return 1.0 if k == 0 else 0.0
+    if k < 0:
+        return 0.0
+    return exp(-lam) * (lam ** k) / factorial(k)
+
+
+def clamp_lambda(lam: float, min_val: float = 0.3, max_val: float = 4.0) -> float:
+    """
+    Limita λ in un range ragionevole per stabilità numerica.
+    
+    Range [0.3, 4.0]:
+    - 0.3: Una squadra che segna pochissimo
+    - 4.0: Una squadra estremamente offensiva
+    
+    Args:
+        lam: Valore lambda grezzo
+        min_val: Minimo ammesso
+        max_val: Massimo ammesso
+    
+    Returns:
+        Lambda limitato nel range
+    """
+    if lam is None or np.isnan(lam):
+        return 1.2  # Default: media ragionevole
+    return float(np.clip(lam, min_val, max_val))
+
+
+def clamp_strength(strength: float, min_val: float = 0.55, max_val: float = 1.60) -> float:
+    """
+    Limita i valori di forza squadra in un range realistico.
+    
+    Range [0.55, 1.60]:
+    - 0.55: Squadra molto debole (es. Monza difesa)
+    - 1.60: Squadra dominante (es. Inter attacco)
+    
+    Args:
+        strength: Valore di forza grezzo
+        min_val: Minimo ammesso
+        max_val: Massimo ammesso
+    
+    Returns:
+        Forza limitata nel range
+    """
+    if strength is None or np.isnan(strength):
+        return 1.0  # Default: media
+    return float(np.clip(strength, min_val, max_val))
+
+
+# ============================================================
+# CORRELAZIONE DIXON-COLES (λ₃)
+# ============================================================
+
+def get_lambda3(mu_home: float, mu_away: float, league_id: int = None) -> float:
+    """
+    Calcola il parametro di correlazione λ₃ per la Poisson bivariata.
+    
+    λ₃ cattura la correlazione tra gol casa e trasferta:
+    - Valori più alti = partite più "aperte" (se una segna, anche l'altra)
+    - Valori più bassi = partite più tattiche
+    
+    Args:
+        mu_home: Gol attesi squadra casa
+        mu_away: Gol attesi squadra trasferta
+        league_id: ID della lega (per calibrazione specifica)
+    
+    Returns:
+        Valore λ₃
+    """
+    # Se la lega è nota, usa il valore calibrato
+    if league_id is not None and league_id in LEAGUE_LAMBDA3:
+        base = LEAGUE_LAMBDA3[league_id]
+    else:
+        base = 0.08  # Default per leghe sconosciute
+    
+    # Leggero aggiustamento basato sulla "vivacità" della partita
+    # Partite più offensive tendono ad avere più correlazione
+    if mu_home > 0 and mu_away > 0:
+        total_expected = mu_home + mu_away
+        # Da 2.0 gol (difensivo) a 3.5+ (offensivo): max +0.03
+        adjustment = 0.015 * min((total_expected - 2.0) / 1.5, 0.5)
+        return float(np.clip(base + adjustment, 0.04, 0.14))
+    
+    return base
+
+
+# ============================================================
+# POISSON BIVARIATA E MATRICE PROBABILITÀ
+# ============================================================
+
+def bivariate_poisson_matrix(mu_home: float, mu_away: float, 
+                              lambda3: float, max_goals: int = MAX_GOALS) -> np.ndarray:
+    """
+    Costruisce la matrice di probabilità per la distribuzione Poisson bivariata.
+    
+    La Poisson bivariata modella la correlazione tra gol casa e trasferta
+    usando un terzo parametro λ₃ (componente comune).
+    
+    Formula:
+    P(X=i, Y=j) = Σ_k [ P_poisson(i-k, λ₁) × P_poisson(j-k, λ₂) × P_poisson(k, λ₃) ]
+    
+    dove:
+    - λ₁ = mu_home - λ₃ (componente indipendente casa)
+    - λ₂ = mu_away - λ₃ (componente indipendente trasferta)
+    - λ₃ = correlazione (componente comune)
+    
+    Args:
+        mu_home: Gol attesi squadra casa
+        mu_away: Gol attesi squadra trasferta
+        lambda3: Parametro di correlazione
+        max_goals: Massimo gol da considerare
+    
+    Returns:
+        Matrice (max_goals+1) x (max_goals+1) con probabilità congiunte
+        M[i,j] = P(home=i, away=j)
+    """
+    # Componenti indipendenti (non possono essere negative)
+    lam1 = max(mu_home - lambda3, 0.01)
+    lam2 = max(mu_away - lambda3, 0.01)
+    
+    # Inizializza matrice
+    M = np.zeros((max_goals + 1, max_goals + 1))
+    
+    # Calcola ogni cella della matrice
+    for i in range(max_goals + 1):
+        for j in range(max_goals + 1):
+            prob_sum = 0.0
+            # Somma su k (componente comune)
+            for k in range(min(i, j) + 1):
+                prob_sum += (poisson_pmf(i - k, lam1) * 
+                            poisson_pmf(j - k, lam2) * 
+                            poisson_pmf(k, lambda3))
+            M[i, j] = prob_sum
+    
+    # Normalizza per assicurare che la somma sia 1
+    total = M.sum()
+    if total > 0:
+        M /= total
+    
+    return M
+
+
+# ============================================================
+# CALCOLO PROBABILITÀ DAI RISULTATI
+# ============================================================
+
+def calculate_1x2(M: np.ndarray) -> Dict[str, float]:
+    """
+    Calcola le probabilità 1X2 dalla matrice.
+    
+    La matrice M[i,j] rappresenta P(home=i, away=j)
+    - Vittoria casa: home > away, quindi i > j (triangolo INFERIORE)
+    - Pareggio: home = away, quindi i = j (diagonale)
+    - Vittoria trasferta: away > home, quindi j > i (triangolo SUPERIORE)
+    
+    Args:
+        M: Matrice Poisson bivariata
+    
+    Returns:
+        Dict con p_home, p_draw, p_away
+    """
+    if M is None or M.size == 0:
+        return {"p_home": 0.33, "p_draw": 0.33, "p_away": 0.34}
+    
+    # Vittoria casa: i > j → triangolo INFERIORE (sotto la diagonale)
+    p_home = float(np.tril(M, k=-1).sum())
+    
+    # Pareggio: diagonale principale (i = j)
+    p_draw = float(np.trace(M))
+    
+    # Vittoria trasferta: j > i → triangolo SUPERIORE (sopra la diagonale)
+    p_away = float(np.triu(M, k=1).sum())
+    
+    # Normalizza per sicurezza
+    total = p_home + p_draw + p_away
+    if total > 0:
+        p_home /= total
+        p_draw /= total
+        p_away /= total
+    
+    return {
+        "p_home": round(p_home, 4),
+        "p_draw": round(p_draw, 4),
+        "p_away": round(p_away, 4)
+    }
+
+
+def calculate_over_under(M: np.ndarray, line: float) -> Dict[str, float]:
+    """
+    Calcola le probabilità Over/Under per una data linea.
+    
+    Args:
+        M: Matrice Poisson bivariata
+        line: Linea di gol (es. 2.5, 3.5)
+    
+    Returns:
+        Dict con p_over e p_under
+    """
+    if M is None or M.size == 0:
+        return {"p_over": 0.50, "p_under": 0.50}
+    
+    n = M.shape[0]
+    threshold = int(np.floor(line)) + 1  # Per Over 2.5, serve >= 3 gol
+    
+    # Somma tutte le celle dove i+j >= threshold
+    p_over = 0.0
+    for i in range(n):
+        for j in range(n):
+            if i + j >= threshold:
+                p_over += M[i, j]
+    
+    p_under = 1.0 - p_over
+    
+    return {
+        "p_over": round(float(p_over), 4),
+        "p_under": round(float(p_under), 4)
+    }
+
+
+def calculate_btts(M: np.ndarray) -> Dict[str, float]:
+    """
+    Calcola le probabilità BTTS (Both Teams To Score / Gol-NoGol).
+    
+    BTTS Yes: entrambe le squadre segnano almeno 1 gol
+    BTTS No: almeno una squadra non segna
+    
+    Args:
+        M: Matrice Poisson bivariata
+    
+    Returns:
+        Dict con p_btts_yes e p_btts_no
+    """
+    if M is None or M.size == 0:
+        return {"p_btts_yes": 0.50, "p_btts_no": 0.50}
+    
+    # BTTS Yes: esclude riga 0 e colonna 0 (quando qualcuno non segna)
+    M_btts = M.copy()
+    M_btts[0, :] = 0  # Casa non segna
+    M_btts[:, 0] = 0  # Trasferta non segna
+    
+    p_btts_yes = float(M_btts.sum())
+    p_btts_no = 1.0 - p_btts_yes
+    
+    return {
+        "p_btts_yes": round(p_btts_yes, 4),
+        "p_btts_no": round(p_btts_no, 4)
+    }
+
+
+def calculate_exact_scores(M: np.ndarray, top_n: int = 10) -> list:
+    """
+    Restituisce i punteggi esatti più probabili.
+    
+    Args:
+        M: Matrice Poisson bivariata
+        top_n: Numero di risultati da restituire
+    
+    Returns:
+        Lista di tuple (home_goals, away_goals, probability)
+    """
+    if M is None or M.size == 0:
+        return []
+    
+    scores = []
+    n = M.shape[0]
+    
+    for i in range(n):
+        for j in range(n):
+            scores.append((i, j, M[i, j]))
+    
+    # Ordina per probabilità decrescente
+    scores.sort(key=lambda x: x[2], reverse=True)
+    
+    # Formatta e restituisce i top N
+    return [(h, a, round(p * 100, 2)) for h, a, p in scores[:top_n]]
+
+
+# ============================================================
+# CALCOLO μ (EXPECTED GOALS) PER SQUADRA
+# ============================================================
+
+def calculate_expected_goals(home_stats: Dict, away_stats: Dict, 
+                             league_id: int = None) -> Tuple[float, float]:
+    """
+    Calcola i gol attesi per entrambe le squadre.
+    
+    Formula:
+    μ_home = base_gf_home × attack_home × defense_away × soft_adj_home
+    μ_away = base_gf_away × attack_away × defense_home × soft_adj_away
+    
+    Args:
+        home_stats: Statistiche squadra casa
+        away_stats: Statistiche squadra trasferta
+        league_id: ID lega per medie specifiche
+    
+    Returns:
+        Tuple (mu_home, mu_away)
+    """
+    # Estrai forze (con clamping)
+    att_home = clamp_strength(home_stats.get("attack_home", 1.0))
+    def_home = clamp_strength(home_stats.get("defense_home", 1.0))
+    att_away = clamp_strength(away_stats.get("attack_away", 1.0))
+    def_away = clamp_strength(away_stats.get("defense_away", 1.0))
+    
+    # Calcola soft adjustment (forma + rank + momentum)
+    def soft_adj(form, rank, momentum):
+        """Combina i fattori di aggiustamento."""
+        if form is None or np.isnan(form):
+            form = 1.0
+        if rank is None or np.isnan(rank):
+            rank = 1.0
+        if momentum is None or np.isnan(momentum):
+            momentum = 1.0
+        
+        combined = (form + rank + momentum) / 3.0
+        return 1.0 + SOFT_ADJ_WEIGHT * (combined - 1.0)
+    
+    adj_home = soft_adj(
+        home_stats.get("form_factor", 1.0),
+        home_stats.get("rank_factor", 1.0),
+        home_stats.get("momentum", 1.0)
+    )
+    
+    adj_away = soft_adj(
+        away_stats.get("form_factor", 1.0),
+        away_stats.get("rank_factor", 1.0),
+        away_stats.get("momentum", 1.0)
+    )
+    
+    # Media gol della lega (se disponibile)
+    base_gf_home = home_stats.get("league_avg_gf_home", DEFAULT_LEAGUE_AVG["gf_home"])
+    base_gf_away = away_stats.get("league_avg_gf_away", DEFAULT_LEAGUE_AVG["gf_away"])
+    
+    if base_gf_home is None or np.isnan(base_gf_home) or base_gf_home <= 0:
+        base_gf_home = DEFAULT_LEAGUE_AVG["gf_home"]
+    if base_gf_away is None or np.isnan(base_gf_away) or base_gf_away <= 0:
+        base_gf_away = DEFAULT_LEAGUE_AVG["gf_away"]
+    
+    # Calcolo finale μ
+    mu_home = base_gf_home * att_home * def_away * adj_home
+    mu_away = base_gf_away * att_away * def_home * adj_away
+    
+    # Clamp per stabilità
+    mu_home = clamp_lambda(mu_home)
+    mu_away = clamp_lambda(mu_away)
+    
+    return mu_home, mu_away
+
+
+# ============================================================
+# FUNZIONE PRINCIPALE: CALCOLA TUTTE LE PROBABILITÀ
+# ============================================================
+
+def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
+                                   league_id: int = None) -> Dict:
+    """
+    Calcola tutte le probabilità per un match.
+    
+    Questa è la funzione principale che orchestra tutti i calcoli:
+    1. Calcola μ per entrambe le squadre
+    2. Calcola λ₃ per la correlazione
+    3. Costruisce la matrice Poisson bivariata
+    4. Estrae tutte le probabilità
+    
+    Args:
+        home_stats: Dict con statistiche squadra casa
+        away_stats: Dict con statistiche squadra trasferta
+        league_id: ID della lega
+    
+    Returns:
+        Dict completo con tutte le probabilità e metriche
+    """
+    # 1. Calcola expected goals
+    mu_home, mu_away = calculate_expected_goals(home_stats, away_stats, league_id)
+    
+    # 2. Calcola λ₃
+    lambda3 = get_lambda3(mu_home, mu_away, league_id)
+    
+    # 3. Costruisci matrice
+    M = bivariate_poisson_matrix(mu_home, mu_away, lambda3)
+    
+    # 4. Calcola tutte le probabilità
+    probs_1x2 = calculate_1x2(M)
+    probs_btts = calculate_btts(M)
+    
+    # Over/Under per varie linee
+    probs_ou = {}
+    for line in [1.5, 2.5, 3.5, 4.5]:
+        ou = calculate_over_under(M, line)
+        probs_ou[f"over_{line}"] = ou["p_over"]
+        probs_ou[f"under_{line}"] = ou["p_under"]
+    
+    # Punteggi esatti più probabili
+    exact_scores = calculate_exact_scores(M, top_n=10)
+    
+    # 5. Calcola probabilità cartellini
+    probs_cards = calculate_cards_probabilities(home_stats, away_stats)
+    
+    return {
+        # Metriche base
+        "mu_home": round(mu_home, 3),
+        "mu_away": round(mu_away, 3),
+        "lambda3": round(lambda3, 4),
+        "total_expected_goals": round(mu_home + mu_away, 2),
+        
+        # 1X2
+        **probs_1x2,
+        
+        # BTTS
+        **probs_btts,
+        
+        # Over/Under
+        **probs_ou,
+        
+        # Cartellini
+        **probs_cards,
+        
+        # Punteggi esatti
+        "exact_scores": exact_scores,
+        
+        # Matrice (per visualizzazione avanzata)
+        "matrix": M
+    }
+
+
+def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict) -> Dict:
+    """
+    Calcola le probabilità Over/Under per i cartellini.
+    Usa distribuzione Poisson semplice sul totale cartellini attesi.
+    
+    Args:
+        home_stats: Statistiche squadra casa
+        away_stats: Statistiche squadra trasferta
+    
+    Returns:
+        Dict con probabilità per ogni linea cartellini
+    """
+    # Media cartellini per squadra (default se non disponibile)
+    home_cards = home_stats.get("total_cards_avg", 1.9)
+    away_cards = away_stats.get("total_cards_avg", 1.9)
+    
+    # Fattore partita: le partite tendono ad avere più cartellini
+    # rispetto alla somma delle medie individuali (effetto competizione)
+    match_factor = 1.05
+    
+    # Lambda totale atteso per la partita
+    lambda_cards = (home_cards + away_cards) * match_factor
+    
+    # Clamp per stabilità
+    lambda_cards = max(2.0, min(lambda_cards, 8.0))
+    
+    # Calcola probabilità cumulative con Poisson
+    probs_cards = {}
+    
+    for line in [2.5, 3.5, 4.5, 5.5, 6.5]:
+        # P(X > line) = 1 - P(X <= floor(line))
+        p_under = 0
+        for k in range(int(line) + 1):
+            p_under += poisson_pmf(k, lambda_cards)
+        
+        p_over = 1 - p_under
+        
+        probs_cards[f"cards_over_{line}"] = round(p_over, 4)
+        probs_cards[f"cards_under_{line}"] = round(p_under, 4)
+    
+    # Aggiungi lambda per riferimento
+    probs_cards["expected_cards"] = round(lambda_cards, 2)
+    probs_cards["home_cards_avg"] = round(home_cards, 2)
+    probs_cards["away_cards_avg"] = round(away_cards, 2)
+    
+    return probs_cards
+
+
+# ============================================================
+# UTILITY: VALUTAZIONE QUALITÀ PREVISIONE
+# ============================================================
+
+def assess_prediction_quality(home_stats: Dict, away_stats: Dict) -> Dict:
+    """
+    Valuta la qualità/affidabilità della previsione basandosi
+    sulla completezza dei dati disponibili.
+    
+    Args:
+        home_stats: Statistiche squadra casa
+        away_stats: Statistiche squadra trasferta
+    
+    Returns:
+        Dict con score (0-100) e messaggio
+    """
+    score = 100
+    issues = []
+    
+    # Check dati casa
+    if home_stats.get("attack_home") in [None, 1.0]:
+        score -= 15
+        issues.append("Dati attacco casa incompleti")
+    if home_stats.get("defense_home") in [None, 1.0]:
+        score -= 15
+        issues.append("Dati difesa casa incompleti")
+    if home_stats.get("form_factor") in [None, 1.0]:
+        score -= 5
+        issues.append("Form casa non disponibile")
+    
+    # Check dati trasferta
+    if away_stats.get("attack_away") in [None, 1.0]:
+        score -= 15
+        issues.append("Dati attacco trasferta incompleti")
+    if away_stats.get("defense_away") in [None, 1.0]:
+        score -= 15
+        issues.append("Dati difesa trasferta incompleti")
+    if away_stats.get("form_factor") in [None, 1.0]:
+        score -= 5
+        issues.append("Form trasferta non disponibile")
+    
+    # Check medie lega
+    if home_stats.get("league_avg_gf_home") is None:
+        score -= 10
+        issues.append("Medie lega non disponibili")
+    
+    # Determina livello
+    if score >= 85:
+        level = "🟢 Alta"
+        message = "Dati completi e affidabili"
+    elif score >= 65:
+        level = "🟡 Media"
+        message = "Alcuni dati mancanti"
+    else:
+        level = "🔴 Bassa"
+        message = "Molti dati mancanti - previsione meno affidabile"
+    
+    return {
+        "score": max(score, 0),
+        "level": level,
+        "message": message,
+        "issues": issues
+    }

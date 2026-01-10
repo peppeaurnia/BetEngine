@@ -1,0 +1,18 @@
+# Match Probability Predictor - Dependencies
+# ==========================================
+
+# Web framework
+streamlit>=1.30.0
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# HTTP requests
+requests>=2.31.0
+
+# Visualizations
+plotly>=5.18.0
+
+# Environment variables (optional, for local development)
+python-dotenv>=1.0.0
