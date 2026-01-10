@@ -360,9 +360,10 @@ st.markdown("""
     button[title="View fullscreen"] {display: none;}
     [data-testid="StyledFullScreenButton"] {display: none;}
     
-    /* Card statistiche squadre - testo nero per label */
+    /* Card statistiche squadre - testo nero per label e valori */
     .team-stats-card h4,
-    .team-stats-card small {
+    .team-stats-card small,
+    .team-stats-card div {
         color: #000000 !important;
     }
 </style>
@@ -558,11 +559,11 @@ def display_team_stats(stats: dict, team_name: str, is_home: bool) -> None:
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
             <div>
                 <small style="color:#000000 !important; font-size:0.75rem;">Att. ({pos})</small>
-                <div style="font-size:1.2rem; color:{att_color}; font-weight:bold;">{att:.2f}</div>
+                <div style="font-size:1.2rem; color:{att_color} !important; font-weight:bold;">{att:.2f}</div>
             </div>
             <div>
                 <small style="color:#000000 !important; font-size:0.75rem;">Dif. ({pos})</small>
-                <div style="font-size:1.2rem; color:{def_color}; font-weight:bold;">{def_:.2f}</div>
+                <div style="font-size:1.2rem; color:{def_color} !important; font-weight:bold;">{def_:.2f}</div>
             </div>
             <div>
                 <small style="color:#000000 !important; font-size:0.75rem;">Forma</small>
