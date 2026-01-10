@@ -352,7 +352,14 @@ st.markdown("""
     /* Nascondi elementi Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    [data-testid="stToolbar"] {display: none;}
+    
+    /* Forza visibilità pulsante apertura sidebar */
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapsedControl"],
+    button[kind="header"] {
+        display: block !important;
+        visibility: visible !important;
+    }
     
     /* Nascondi pulsanti fullscreen/expand sulle immagini */
     button[title="View fullscreen"] {display: none;}
