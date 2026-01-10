@@ -546,27 +546,24 @@ def display_team_stats(stats: dict, team_name: str, is_home: bool) -> None:
     att_color = "#27ae60" if att > 1.1 else "#e74c3c" if att < 0.9 else "#f39c12"
     def_color = "#27ae60" if def_ < 0.9 else "#e74c3c" if def_ > 1.1 else "#f39c12"
     
-    # Abbreviazioni per mobile
-    pos_short = "🏠" if is_home else "✈️"
-    
     st.markdown(f"""
     <div style="background:#f8f9fa; padding:15px; border-radius:10px; border-left:4px solid {'#3498db' if is_home else '#e74c3c'}; color:#1a1a2e;">
         <h4 style="margin:0 0 10px 0; color:#1a1a2e;">{team_name}</h4>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
             <div>
-                <small style="color:#666; font-size:0.75rem;">Attacco {pos_short}</small>
+                <small style="color:#000000; font-size:0.75rem;">Att. ({pos})</small>
                 <div style="font-size:1.2rem; color:{att_color}; font-weight:bold;">{att:.2f}</div>
             </div>
             <div>
-                <small style="color:#666; font-size:0.75rem;">Difesa {pos_short}</small>
+                <small style="color:#000000; font-size:0.75rem;">Dif. ({pos})</small>
                 <div style="font-size:1.2rem; color:{def_color}; font-weight:bold;">{def_:.2f}</div>
             </div>
             <div>
-                <small style="color:#666; font-size:0.75rem;">Forma</small>
+                <small style="color:#000000; font-size:0.75rem;">Forma</small>
                 <div style="font-size:1.1rem; color:#1a1a2e;">{form:.2f} <small>({form_str[-5:] if form_str else 'N/A'})</small></div>
             </div>
             <div>
-                <small style="color:#666; font-size:0.75rem;">Posizione</small>
+                <small style="color:#000000; font-size:0.75rem;">Posizione</small>
                 <div style="font-size:1.2rem; color:#1a1a2e;">{rank}°</div>
             </div>
         </div>
