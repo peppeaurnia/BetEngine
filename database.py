@@ -21,6 +21,11 @@ def get_connection():
     return conn
 
 
+def hash_password(password: str) -> str:
+    """Hash della password con SHA-256."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
 def init_database():
     """Inizializza il database con la tabella utenti."""
     conn = get_connection()
@@ -41,12 +46,21 @@ def init_database():
     """)
     
     conn.commit()
+    
+    # Crea admin di default se non esiste nessun utente
+    cursor.execute("SELECT COUNT(*) FROM users")
+    count = cursor.fetchone()[0]
+    
+    if count == 0:
+        # Crea utente admin di default
+        admin_hash = hash_password("admin123")
+        cursor.execute("""
+            INSERT INTO users (username, password_hash, email, is_admin, is_active)
+            VALUES (?, ?, ?, 1, 1)
+        """, ("Boppo", admin_hash, "admin@betengine.com"))
+        conn.commit()
+    
     conn.close()
-
-
-def hash_password(password: str) -> str:
-    """Hash della password con SHA-256."""
-    return hashlib.sha256(password.encode()).hexdigest()
 
 
 def create_user(username: str, password: str, email: str = None, 
