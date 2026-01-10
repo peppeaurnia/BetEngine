@@ -142,6 +142,14 @@ def show_login_page():
         /* Nascondi pulsante fullscreen immagini */
         button[title="View fullscreen"] {display: none;}
         [data-testid="StyledFullScreenButton"] {display: none;}
+        
+        /* Bottone ACCEDI - testo nero */
+        .stButton button p,
+        .stButton button span,
+        .stFormSubmitButton button p,
+        .stFormSubmitButton button span {
+            color: #000000 !important;
+        }
     </style>
     """, unsafe_allow_html=True)
     
@@ -212,7 +220,9 @@ def show_admin_panel():
         
         /* Bottone "Crea Utente" - testo nero */
         .stTabs [data-baseweb="tab-panel"] .stButton button p,
-        .stTabs [data-baseweb="tab-panel"] .stButton button span {
+        .stTabs [data-baseweb="tab-panel"] .stButton button span,
+        .stTabs [data-baseweb="tab-panel"] .stFormSubmitButton button p,
+        .stTabs [data-baseweb="tab-panel"] .stFormSubmitButton button span {
             color: #000000 !important;
         }
         
