@@ -135,8 +135,6 @@ def show_login_page():
         /* Nascondi elementi Streamlit */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
-        header {visibility: hidden;}
-        [data-testid="stHeader"] {display: none;}
         [data-testid="stToolbar"] {display: none;}
         
         /* Nascondi pulsante fullscreen immagini */
