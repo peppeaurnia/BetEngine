@@ -359,6 +359,12 @@ st.markdown("""
     /* Nascondi pulsanti fullscreen/expand sulle immagini */
     button[title="View fullscreen"] {display: none;}
     [data-testid="StyledFullScreenButton"] {display: none;}
+    
+    /* Card statistiche squadre - testo nero per label */
+    .team-stats-card h4,
+    .team-stats-card small {
+        color: #000000 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -547,7 +553,7 @@ def display_team_stats(stats: dict, team_name: str, is_home: bool) -> None:
     def_color = "#27ae60" if def_ < 0.9 else "#e74c3c" if def_ > 1.1 else "#f39c12"
     
     st.markdown(f"""
-    <div style="background:#f8f9fa; padding:15px; border-radius:10px; border-left:4px solid {'#3498db' if is_home else '#e74c3c'};">
+    <div class="team-stats-card" style="background:#f8f9fa; padding:15px; border-radius:10px; border-left:4px solid {'#3498db' if is_home else '#e74c3c'};">
         <h4 style="margin:0 0 10px 0; color:#000000 !important;">{team_name}</h4>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
             <div>
