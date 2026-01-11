@@ -40,6 +40,7 @@ from auth import (
     show_admin_panel,
     show_user_info_sidebar
 )
+from database import init_database
 
 # ============================================================
 # CONFIGURAZIONE PAGINA
@@ -50,6 +51,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Inizializza database (dopo che Streamlit è pronto)
+try:
+    init_database()
+except Exception as e:
+    st.error(f"Errore connessione database: {e}")
 
 # CSS personalizzato
 st.markdown("""

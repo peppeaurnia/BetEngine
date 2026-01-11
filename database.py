@@ -10,13 +10,21 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import streamlit as st
 
 # Configurazione Supabase
-SUPABASE_PASSWORD = os.environ.get("SUPABASE_PASSWORD", "ZS&Np7$f2hfa,VS")
 SUPABASE_HOST = "db.xhryuvkqafobefefzqjr.supabase.co"
 SUPABASE_DB = "postgres"
 SUPABASE_USER = "postgres"
 SUPABASE_PORT = "5432"
+
+
+def get_supabase_password():
+    """Ottiene la password da Streamlit secrets o variabile d'ambiente."""
+    try:
+        return st.secrets["SUPABASE_PASSWORD"]
+    except:
+        return os.environ.get("SUPABASE_PASSWORD", "")
 
 
 def get_connection():
@@ -25,8 +33,9 @@ def get_connection():
         host=SUPABASE_HOST,
         database=SUPABASE_DB,
         user=SUPABASE_USER,
-        password=SUPABASE_PASSWORD,
-        port=SUPABASE_PORT
+        password=get_supabase_password(),
+        port=SUPABASE_PORT,
+        sslmode='require'
     )
     return conn
 
@@ -269,5 +278,8 @@ def change_password(username: str, new_password: str) -> bool:
     return affected > 0
 
 
-# Inizializza il database all'import
-init_database()
+# Inizializza il database all'import (con gestione errori)
+try:
+    init_database()
+except Exception as e:
+    print(f"⚠️ Database init posticipato: {e}")
