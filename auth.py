@@ -251,7 +251,10 @@ def show_admin_panel():
                     status_color = "#e74c3c"
                 elif user['subscription_end']:
                     try:
-                        end_date = datetime.strptime(user['subscription_end'], '%Y-%m-%d %H:%M:%S.%f')
+                        end_date = user['subscription_end']
+                        # Se è una stringa, convertila in datetime
+                        if isinstance(end_date, str):
+                            end_date = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S.%f')
                         if datetime.now() < end_date:
                             days_left = (end_date - datetime.now()).days
                             status = f"✅ Attivo ({days_left} giorni)"
@@ -270,10 +273,16 @@ def show_admin_panel():
                     col1, col2 = st.columns(2)
                     with col1:
                         st.write(f"📧 Email: {user['email'] or 'N/A'}")
-                        st.write(f"📅 Creato: {user['created_at'][:10] if user['created_at'] else 'N/A'}")
+                        created = user['created_at']
+                        created_str = str(created)[:10] if created else 'N/A'
+                        st.write(f"📅 Creato: {created_str}")
                     with col2:
-                        st.write(f"🕐 Ultimo login: {user['last_login'][:16] if user['last_login'] else 'Mai'}")
-                        st.write(f"📆 Scadenza: {user['subscription_end'][:10] if user['subscription_end'] else 'N/A'}")
+                        last = user['last_login']
+                        last_str = str(last)[:16] if last else 'Mai'
+                        st.write(f"🕐 Ultimo login: {last_str}")
+                        sub_end = user['subscription_end']
+                        sub_str = str(sub_end)[:10] if sub_end else 'N/A'
+                        st.write(f"📆 Scadenza: {sub_str}")
         else:
             st.info("Nessun utente registrato")
     
