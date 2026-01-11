@@ -1,23 +1,33 @@
 """
 🗄️ DATABASE - Gestione utenti BetEngine
 ========================================
-Database SQLite per gestire utenti e abbonamenti.
+Database PostgreSQL (Supabase) per gestire utenti e abbonamenti.
 """
 
-import sqlite3
 import hashlib
 import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
-# Path del database
-DB_PATH = "betengine_users.db"
+# Configurazione Supabase
+SUPABASE_PASSWORD = os.environ.get("SUPABASE_PASSWORD", "ZS&Np7$f2hfa,VS")
+SUPABASE_HOST = "db.xhryuvkqafobefefzqjr.supabase.co"
+SUPABASE_DB = "postgres"
+SUPABASE_USER = "postgres"
+SUPABASE_PORT = "5432"
 
 
 def get_connection():
-    """Crea connessione al database."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """Crea connessione al database PostgreSQL."""
+    conn = psycopg2.connect(
+        host=SUPABASE_HOST,
+        database=SUPABASE_DB,
+        user=SUPABASE_USER,
+        password=SUPABASE_PASSWORD,
+        port=SUPABASE_PORT
+    )
     return conn
 
 
@@ -33,13 +43,13 @@ def init_database():
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            email TEXT,
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(255) UNIQUE NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            email VARCHAR(255),
             is_admin INTEGER DEFAULT 0,
             is_active INTEGER DEFAULT 1,
-            subscription_end DATE,
+            subscription_end TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_login TIMESTAMP
         )
@@ -56,10 +66,11 @@ def init_database():
         admin_hash = hash_password("admin123")
         cursor.execute("""
             INSERT INTO users (username, password_hash, email, is_admin, is_active)
-            VALUES (?, ?, ?, 1, 1)
+            VALUES (%s, %s, %s, 1, 1)
         """, ("Boppo", admin_hash, "admin@betengine.com"))
         conn.commit()
     
+    cursor.close()
     conn.close()
 
 
@@ -67,16 +78,6 @@ def create_user(username: str, password: str, email: str = None,
                 is_admin: bool = False, subscription_days: int = 30) -> bool:
     """
     Crea un nuovo utente.
-    
-    Args:
-        username: Nome utente
-        password: Password in chiaro (verrà hashata)
-        email: Email opzionale
-        is_admin: Se è admin
-        subscription_days: Giorni di abbonamento (default 30)
-    
-    Returns:
-        True se creato, False se username già esiste
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -86,33 +87,33 @@ def create_user(username: str, password: str, email: str = None,
         
         cursor.execute("""
             INSERT INTO users (username, password_hash, email, is_admin, subscription_end)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
         """, (username, hash_password(password), email, int(is_admin), subscription_end))
         
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        conn.rollback()
         return False  # Username già esiste
     finally:
+        cursor.close()
         conn.close()
 
 
 def verify_user(username: str, password: str) -> Optional[Dict]:
     """
     Verifica credenziali utente.
-    
-    Returns:
-        Dict con dati utente se valido, None se credenziali errate
     """
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     cursor.execute("""
         SELECT * FROM users 
-        WHERE username = ? AND password_hash = ? AND is_active = 1
+        WHERE username = %s AND password_hash = %s AND is_active = 1
     """, (username, hash_password(password)))
     
     row = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     if row:
@@ -123,14 +124,15 @@ def verify_user(username: str, password: str) -> Optional[Dict]:
 def check_subscription(username: str) -> bool:
     """Controlla se l'abbonamento è attivo."""
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     cursor.execute("""
         SELECT subscription_end, is_admin FROM users 
-        WHERE username = ? AND is_active = 1
+        WHERE username = %s AND is_active = 1
     """, (username,))
     
     row = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     if not row:
@@ -142,8 +144,7 @@ def check_subscription(username: str) -> bool:
     
     # Controlla scadenza
     if row['subscription_end']:
-        end_date = datetime.strptime(row['subscription_end'], '%Y-%m-%d %H:%M:%S.%f')
-        return datetime.now() < end_date
+        return datetime.now() < row['subscription_end']
     
     return False
 
@@ -154,20 +155,22 @@ def update_last_login(username: str):
     cursor = conn.cursor()
     
     cursor.execute("""
-        UPDATE users SET last_login = ? WHERE username = ?
+        UPDATE users SET last_login = %s WHERE username = %s
     """, (datetime.now(), username))
     
     conn.commit()
+    cursor.close()
     conn.close()
 
 
 def get_all_users() -> List[Dict]:
     """Restituisce tutti gli utenti (per pannello admin)."""
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
     rows = cursor.fetchall()
+    cursor.close()
     conn.close()
     
     return [dict(row) for row in rows]
@@ -176,23 +179,21 @@ def get_all_users() -> List[Dict]:
 def extend_subscription(username: str, days: int) -> bool:
     """Estende l'abbonamento di X giorni."""
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     # Prendi la data attuale di scadenza
-    cursor.execute("SELECT subscription_end FROM users WHERE username = ?", (username,))
+    cursor.execute("SELECT subscription_end FROM users WHERE username = %s", (username,))
     row = cursor.fetchone()
     
     if not row:
+        cursor.close()
         conn.close()
         return False
     
     # Se scaduto, parti da oggi
     if row['subscription_end']:
-        try:
-            current_end = datetime.strptime(row['subscription_end'], '%Y-%m-%d %H:%M:%S.%f')
-            if current_end < datetime.now():
-                current_end = datetime.now()
-        except:
+        current_end = row['subscription_end']
+        if current_end < datetime.now():
             current_end = datetime.now()
     else:
         current_end = datetime.now()
@@ -200,10 +201,11 @@ def extend_subscription(username: str, days: int) -> bool:
     new_end = current_end + timedelta(days=days)
     
     cursor.execute("""
-        UPDATE users SET subscription_end = ? WHERE username = ?
+        UPDATE users SET subscription_end = %s WHERE username = %s
     """, (new_end, username))
     
     conn.commit()
+    cursor.close()
     conn.close()
     return True
 
@@ -213,9 +215,10 @@ def deactivate_user(username: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("UPDATE users SET is_active = 0 WHERE username = ?", (username,))
+    cursor.execute("UPDATE users SET is_active = 0 WHERE username = %s", (username,))
     conn.commit()
     affected = cursor.rowcount
+    cursor.close()
     conn.close()
     
     return affected > 0
@@ -226,9 +229,10 @@ def activate_user(username: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("UPDATE users SET is_active = 1 WHERE username = ?", (username,))
+    cursor.execute("UPDATE users SET is_active = 1 WHERE username = %s", (username,))
     conn.commit()
     affected = cursor.rowcount
+    cursor.close()
     conn.close()
     
     return affected > 0
@@ -239,9 +243,10 @@ def delete_user(username: str) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("DELETE FROM users WHERE username = ? AND is_admin = 0", (username,))
+    cursor.execute("DELETE FROM users WHERE username = %s AND is_admin = 0", (username,))
     conn.commit()
     affected = cursor.rowcount
+    cursor.close()
     conn.close()
     
     return affected > 0
@@ -253,11 +258,12 @@ def change_password(username: str, new_password: str) -> bool:
     cursor = conn.cursor()
     
     cursor.execute("""
-        UPDATE users SET password_hash = ? WHERE username = ?
+        UPDATE users SET password_hash = %s WHERE username = %s
     """, (hash_password(new_password), username))
     
     conn.commit()
     affected = cursor.rowcount
+    cursor.close()
     conn.close()
     
     return affected > 0
