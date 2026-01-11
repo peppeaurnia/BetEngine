@@ -12,11 +12,11 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import streamlit as st
 
-# Configurazione Supabase
-SUPABASE_HOST = "db.xhryuvkqafobefefzqjr.supabase.co"
+# Configurazione Supabase (Connection Pooler)
+SUPABASE_HOST = "aws-1-eu-west-1.pooler.supabase.com"
 SUPABASE_DB = "postgres"
-SUPABASE_USER = "postgres"
-SUPABASE_PORT = "5432"
+SUPABASE_USER = "postgres.xhryuvkqafobefefzqjr"
+SUPABASE_PORT = "6543"
 
 
 def get_supabase_password():
