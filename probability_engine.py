@@ -391,12 +391,17 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
     if rank_home and rank_away and rank_home > 0 and rank_away > 0:
         # Differenza posizioni: positivo se casa è meglio in classifica
         rank_diff = rank_away - rank_home
-        # Ogni 5 posizioni di differenza = +/- 15% xG
-        rank_diff_boost_home = 1.0 + (rank_diff * 0.03)
-        rank_diff_boost_away = 1.0 - (rank_diff * 0.02)
+        # Ogni 5 posizioni di differenza = +/- 20% xG (aumentato)
+        rank_diff_boost_home = 1.0 + (rank_diff * 0.05)
+        rank_diff_boost_away = 1.0 - (rank_diff * 0.03)
+        
+        # BONUS BIG TEAM: squadre top 6 in casa contro squadre fuori top 10
+        if rank_home <= 6 and rank_away > 10:
+            rank_diff_boost_home *= 1.15  # +15% extra per big team vs small team
+        
         # Clamp per evitare valori estremi
-        rank_diff_boost_home = np.clip(rank_diff_boost_home, 0.7, 1.5)
-        rank_diff_boost_away = np.clip(rank_diff_boost_away, 0.6, 1.3)
+        rank_diff_boost_home = np.clip(rank_diff_boost_home, 0.7, 2.0)
+        rank_diff_boost_away = np.clip(rank_diff_boost_away, 0.4, 1.3)
     else:
         rank_diff_boost_home = 1.0
         rank_diff_boost_away = 1.0
@@ -412,12 +417,16 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
     
     # NUOVO: Correzione difesa - se difesa sembra troppo buona per la classifica, correggi
     # Una squadra bassa in classifica non può avere difesa troppo buona
-    if rank_away and rank_away > 10 and def_away < 0.85:
-        # Squadra nella parte bassa con difesa "troppo buona" - correggi verso l'alto
-        def_away = 0.85 + (def_away - 0.85) * 0.5
+    if rank_away and rank_away > 10 and def_away < 1.0:
+        # Squadra nella parte bassa con difesa "troppo buona" - correggi verso 1.0 (media)
+        correction_factor = (rank_away - 10) / 10  # 0.3 per 13°, 0.5 per 15°, etc.
+        def_away = def_away + (1.0 - def_away) * min(correction_factor, 0.6)
+        def_away = min(def_away, 1.3)  # Non superare 1.3
     
-    if rank_home and rank_home > 10 and def_home < 0.85:
-        def_home = 0.85 + (def_home - 0.85) * 0.5
+    if rank_home and rank_home > 10 and def_home < 1.0:
+        correction_factor = (rank_home - 10) / 10
+        def_home = def_home + (1.0 - def_home) * min(correction_factor, 0.6)
+        def_home = min(def_home, 1.3)
     
     # Calcolo finale μ
     mu_home = base_gf_home * att_home * def_away * adj_home * rank_diff_boost_home
