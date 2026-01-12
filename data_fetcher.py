@@ -77,15 +77,15 @@ def _form_factor(form_str: str) -> float:
 def _rank_factor(rank: int, total: int) -> float:
     """
     Moltiplicatore basato sulla posizione in classifica.
-    1° posto -> 1.15, ultimo -> 0.85
+    1° posto -> 1.25, ultimo -> 0.75
     """
     if not rank or not total or rank <= 0:
         return 1.0
     
     # Normalizza posizione (1° = 1.0, ultimo = 0.0)
     x = 1 - (rank - 1) / max(total - 1, 1)
-    # Scala a range 0.85-1.15
-    return 0.85 + 0.3 * x
+    # Scala a range 0.75-1.25 (aumentato per maggiore impatto)
+    return 0.75 + 0.5 * x
 
 
 # ============================================================

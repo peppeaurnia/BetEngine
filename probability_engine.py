@@ -19,12 +19,12 @@ from typing import Dict, Tuple, Optional
 # PARAMETRI DEL MODELLO
 # ============================================================
 MAX_GOALS = 10          # Massimo gol per squadra nella matrice
-SOFT_ADJ_WEIGHT = 0.20  # Peso per aggiustamenti forma/rank/momentum
+SOFT_ADJ_WEIGHT = 0.30  # Peso per aggiustamenti forma/rank/momentum (aumentato)
 
 # λ₃ calibrato empiricamente per ogni lega (correlazione gol)
 LEAGUE_LAMBDA3 = {
     39:  0.08,   # Premier League (partite aperte)
-    135: 0.05,   # Serie A (tattica, meno gol correlati)
+    135: 0.06,   # Serie A (tattica, meno gol correlati)
     140: 0.05,   # LaLiga (possesso palla)
     78:  0.10,   # Bundesliga (pressing alto, contropiedi)
     61:  0.08,   # Ligue 1
@@ -32,10 +32,10 @@ LEAGUE_LAMBDA3 = {
     88:  0.08,   # Eredivisie
 }
 
-# Medie di lega di fallback (se non disponibili da API)
+# Medie di lega di fallback (aumentate per essere più realistiche)
 DEFAULT_LEAGUE_AVG = {
-    "gf_home": 1.45,  # Gol fatti in casa (media europea)
-    "gf_away": 1.15,  # Gol fatti fuori casa
+    "gf_home": 1.55,  # Gol fatti in casa (media europea)
+    "gf_away": 1.25,  # Gol fatti fuori casa
 }
 
 
@@ -62,13 +62,13 @@ def poisson_pmf(k: int, lam: float) -> float:
     return exp(-lam) * (lam ** k) / factorial(k)
 
 
-def clamp_lambda(lam: float, min_val: float = 0.3, max_val: float = 4.0) -> float:
+def clamp_lambda(lam: float, min_val: float = 0.4, max_val: float = 4.5) -> float:
     """
     Limita λ in un range ragionevole per stabilità numerica.
     
-    Range [0.3, 4.0]:
-    - 0.3: Una squadra che segna pochissimo
-    - 4.0: Una squadra estremamente offensiva
+    Range [0.4, 4.5]:
+    - 0.4: Una squadra che segna pochissimo
+    - 4.5: Una squadra estremamente offensiva (es. big vs neopromossa)
     
     Args:
         lam: Valore lambda grezzo
@@ -79,17 +79,17 @@ def clamp_lambda(lam: float, min_val: float = 0.3, max_val: float = 4.0) -> floa
         Lambda limitato nel range
     """
     if lam is None or np.isnan(lam):
-        return 1.2  # Default: media ragionevole
+        return 1.3  # Default: media ragionevole
     return float(np.clip(lam, min_val, max_val))
 
 
-def clamp_strength(strength: float, min_val: float = 0.55, max_val: float = 1.60) -> float:
+def clamp_strength(strength: float, min_val: float = 0.45, max_val: float = 2.0) -> float:
     """
     Limita i valori di forza squadra in un range realistico.
     
-    Range [0.55, 1.60]:
-    - 0.55: Squadra molto debole (es. Monza difesa)
-    - 1.60: Squadra dominante (es. Inter attacco)
+    Range [0.45, 2.0]:
+    - 0.45: Squadra molto debole (neopromossa in difficoltà)
+    - 2.0: Squadra dominante (es. Inter/Juve attacco vs neopromossa)
     
     Args:
         strength: Valore di forza grezzo
