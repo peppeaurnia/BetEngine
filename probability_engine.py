@@ -342,8 +342,8 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
     Calcola i gol attesi per entrambe le squadre.
     
     Formula:
-    μ_home = base_gf_home × attack_home × defense_away × soft_adj_home
-    μ_away = base_gf_away × attack_away × defense_home × soft_adj_away
+    μ_home = base_gf_home × attack_home × defense_away × soft_adj_home × rank_diff_factor
+    μ_away = base_gf_away × attack_away × defense_home × soft_adj_away × rank_diff_factor
     
     Args:
         home_stats: Statistiche squadra casa
@@ -384,6 +384,23 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
         away_stats.get("momentum", 1.0)
     )
     
+    # NUOVO: Fattore basato sulla differenza di classifica
+    rank_home = home_stats.get("rank", 10)
+    rank_away = away_stats.get("rank", 10)
+    
+    if rank_home and rank_away and rank_home > 0 and rank_away > 0:
+        # Differenza posizioni: positivo se casa è meglio in classifica
+        rank_diff = rank_away - rank_home
+        # Ogni 5 posizioni di differenza = +/- 15% xG
+        rank_diff_boost_home = 1.0 + (rank_diff * 0.03)
+        rank_diff_boost_away = 1.0 - (rank_diff * 0.02)
+        # Clamp per evitare valori estremi
+        rank_diff_boost_home = np.clip(rank_diff_boost_home, 0.7, 1.5)
+        rank_diff_boost_away = np.clip(rank_diff_boost_away, 0.6, 1.3)
+    else:
+        rank_diff_boost_home = 1.0
+        rank_diff_boost_away = 1.0
+    
     # Media gol della lega (se disponibile)
     base_gf_home = home_stats.get("league_avg_gf_home", DEFAULT_LEAGUE_AVG["gf_home"])
     base_gf_away = away_stats.get("league_avg_gf_away", DEFAULT_LEAGUE_AVG["gf_away"])
@@ -393,9 +410,18 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
     if base_gf_away is None or np.isnan(base_gf_away) or base_gf_away <= 0:
         base_gf_away = DEFAULT_LEAGUE_AVG["gf_away"]
     
+    # NUOVO: Correzione difesa - se difesa sembra troppo buona per la classifica, correggi
+    # Una squadra bassa in classifica non può avere difesa troppo buona
+    if rank_away and rank_away > 10 and def_away < 0.85:
+        # Squadra nella parte bassa con difesa "troppo buona" - correggi verso l'alto
+        def_away = 0.85 + (def_away - 0.85) * 0.5
+    
+    if rank_home and rank_home > 10 and def_home < 0.85:
+        def_home = 0.85 + (def_home - 0.85) * 0.5
+    
     # Calcolo finale μ
-    mu_home = base_gf_home * att_home * def_away * adj_home
-    mu_away = base_gf_away * att_away * def_home * adj_away
+    mu_home = base_gf_home * att_home * def_away * adj_home * rank_diff_boost_home
+    mu_away = base_gf_away * att_away * def_home * adj_away * rank_diff_boost_away
     
     # Clamp per stabilità
     mu_home = clamp_lambda(mu_home)
