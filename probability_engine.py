@@ -391,17 +391,18 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
     if rank_home and rank_away and rank_home > 0 and rank_away > 0:
         # Differenza posizioni: positivo se casa è meglio in classifica
         rank_diff = rank_away - rank_home
-        # Ogni 5 posizioni di differenza = +/- 20% xG (aumentato)
-        rank_diff_boost_home = 1.0 + (rank_diff * 0.05)
-        rank_diff_boost_away = 1.0 - (rank_diff * 0.03)
+        # Ogni posizione di differenza = +2% xG casa, -1.5% xG trasferta (moderato)
+        rank_diff_boost_home = 1.0 + (rank_diff * 0.02)
+        rank_diff_boost_away = 1.0 - (rank_diff * 0.015)
         
-        # BONUS BIG TEAM: squadre top 6 in casa contro squadre fuori top 10
-        if rank_home <= 6 and rank_away > 10:
-            rank_diff_boost_home *= 1.15  # +15% extra per big team vs small team
+        # BONUS BIG TEAM: squadre top 5 in casa contro squadre fuori top 10
+        # Solo +8% extra (moderato)
+        if rank_home <= 5 and rank_away > 10:
+            rank_diff_boost_home *= 1.08
         
         # Clamp per evitare valori estremi
-        rank_diff_boost_home = np.clip(rank_diff_boost_home, 0.7, 2.0)
-        rank_diff_boost_away = np.clip(rank_diff_boost_away, 0.4, 1.3)
+        rank_diff_boost_home = np.clip(rank_diff_boost_home, 0.85, 1.35)
+        rank_diff_boost_away = np.clip(rank_diff_boost_away, 0.70, 1.15)
     else:
         rank_diff_boost_home = 1.0
         rank_diff_boost_away = 1.0
@@ -417,16 +418,14 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
     
     # NUOVO: Correzione difesa - se difesa sembra troppo buona per la classifica, correggi
     # Una squadra bassa in classifica non può avere difesa troppo buona
-    if rank_away and rank_away > 10 and def_away < 1.0:
-        # Squadra nella parte bassa con difesa "troppo buona" - correggi verso 1.0 (media)
-        correction_factor = (rank_away - 10) / 10  # 0.3 per 13°, 0.5 per 15°, etc.
-        def_away = def_away + (1.0 - def_away) * min(correction_factor, 0.6)
-        def_away = min(def_away, 1.3)  # Non superare 1.3
+    if rank_away and rank_away > 12 and def_away < 0.90:
+        # Squadra nella parte bassa con difesa "troppo buona" - correggi leggermente
+        correction_factor = (rank_away - 12) / 15  # Più graduale
+        def_away = def_away + (0.95 - def_away) * min(correction_factor, 0.4)
     
-    if rank_home and rank_home > 10 and def_home < 1.0:
-        correction_factor = (rank_home - 10) / 10
-        def_home = def_home + (1.0 - def_home) * min(correction_factor, 0.6)
-        def_home = min(def_home, 1.3)
+    if rank_home and rank_home > 12 and def_home < 0.90:
+        correction_factor = (rank_home - 12) / 15
+        def_home = def_home + (0.95 - def_home) * min(correction_factor, 0.4)
     
     # Calcolo finale μ
     mu_home = base_gf_home * att_home * def_away * adj_home * rank_diff_boost_home
