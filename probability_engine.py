@@ -446,7 +446,9 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
                                    league_id: int = None,
                                    h2h_data: Dict = None,
                                    home_shots: Dict = None,
-                                   away_shots: Dict = None) -> Dict:
+                                   away_shots: Dict = None,
+                                   referee_name: str = None,
+                                   league_name: str = None) -> Dict:
     """
     Calcola tutte le probabilità per un match.
     
@@ -456,6 +458,7 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
     3. Calcola λ₃ per la correlazione
     4. Costruisce la matrice Poisson bivariata
     5. Estrae tutte le probabilità
+    6. Calcola probabilità cartellini con aggiustamento arbitro
     
     Args:
         home_stats: Dict con statistiche squadra casa
@@ -464,6 +467,8 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         h2h_data: Dict con dati scontri diretti
         home_shots: Dict con media tiri squadra casa
         away_shots: Dict con media tiri squadra trasferta
+        referee_name: Nome dell'arbitro (opzionale)
+        league_name: Nome della lega per aggiustamento arbitro specifico
     
     Returns:
         Dict completo con tutte le probabilità e metriche
@@ -508,8 +513,18 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
     # Punteggi esatti più probabili
     exact_scores = calculate_exact_scores(M, top_n=10)
     
-    # 7. Calcola probabilità cartellini
-    probs_cards = calculate_cards_probabilities(home_stats, away_stats)
+    # 7. Carica dati arbitro (se disponibile)
+    referee_data = None
+    if referee_name:
+        try:
+            from .fetch_referee_stats import get_referee_adjustment
+            referee_data = get_referee_adjustment(referee_name, league_name)
+        except ImportError:
+            # Modulo non ancora disponibile o errore import
+            referee_data = {"found": False, "severity_factor": 1.0}
+    
+    # 8. Calcola probabilità cartellini con aggiustamento arbitro
+    probs_cards = calculate_cards_probabilities(home_stats, away_stats, referee_data)
     
     return {
         # Metriche base
@@ -523,6 +538,9 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         "h2h_adj_away": round(h2h_adj_away, 3),
         "shots_adj_home": round(shots_adj_home, 3),
         "shots_adj_away": round(shots_adj_away, 3),
+        
+        # Info arbitro
+        "referee_name": referee_name,
         
         # 1X2
         **probs_1x2,
@@ -626,14 +644,17 @@ def calculate_shots_adjustment(shots_data: Dict) -> float:
     return float(np.clip(adjustment, 0.90, 1.15))
 
 
-def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict) -> Dict:
+def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict, 
+                                   referee_data: Dict = None) -> Dict:
     """
     Calcola le probabilità Over/Under per i cartellini.
-    Usa distribuzione Poisson semplice sul totale cartellini attesi.
+    Usa distribuzione Poisson semplice sul totale cartellini attesi,
+    aggiustato in base alla severità dell'arbitro.
     
     Args:
         home_stats: Statistiche squadra casa
         away_stats: Statistiche squadra trasferta
+        referee_data: Dict con dati arbitro (severity_factor, avg_cards, etc.)
     
     Returns:
         Dict con probabilità per ogni linea cartellini
@@ -646,8 +667,49 @@ def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict) -> Dict:
     # rispetto alla somma delle medie individuali (effetto competizione)
     match_factor = 1.05
     
-    # Lambda totale atteso per la partita
-    lambda_cards = (home_cards + away_cards) * match_factor
+    # Lambda totale atteso per la partita (base)
+    lambda_cards_base = (home_cards + away_cards) * match_factor
+    
+    # ============================================================
+    # AGGIUSTAMENTO ARBITRO
+    # ============================================================
+    referee_adjustment = 1.0
+    referee_info = {}
+    
+    if referee_data and referee_data.get("found"):
+        severity = referee_data.get("severity_factor", 1.0)
+        
+        # L'aggiustamento è proporzionale alla deviazione dalla media
+        # severity = 1.0 -> nessun aggiustamento
+        # severity = 1.3 -> arbitro 30% più severo -> +15% cartellini attesi
+        # severity = 0.7 -> arbitro 30% più permissivo -> -15% cartellini attesi
+        # 
+        # Usiamo un peso moderato (0.5) per non sovrappesare l'arbitro
+        # rispetto alle caratteristiche delle squadre
+        REFEREE_WEIGHT = 0.5
+        referee_adjustment = 1.0 + (severity - 1.0) * REFEREE_WEIGHT
+        
+        # Clamp per evitare estremi
+        referee_adjustment = np.clip(referee_adjustment, 0.80, 1.25)
+        
+        referee_info = {
+            "referee_found": True,
+            "referee_severity": round(severity, 3),
+            "referee_adjustment": round(referee_adjustment, 3),
+            "referee_avg_cards": referee_data.get("avg_cards"),
+            "referee_matches": referee_data.get("matches", 0)
+        }
+    else:
+        referee_info = {
+            "referee_found": False,
+            "referee_severity": 1.0,
+            "referee_adjustment": 1.0,
+            "referee_avg_cards": None,
+            "referee_matches": 0
+        }
+    
+    # Lambda finale con aggiustamento arbitro
+    lambda_cards = lambda_cards_base * referee_adjustment
     
     # Clamp per stabilità
     lambda_cards = max(2.0, min(lambda_cards, 8.0))
@@ -666,10 +728,14 @@ def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict) -> Dict:
         probs_cards[f"cards_over_{line}"] = round(p_over, 4)
         probs_cards[f"cards_under_{line}"] = round(p_under, 4)
     
-    # Aggiungi lambda per riferimento
+    # Aggiungi lambda e info per riferimento
     probs_cards["expected_cards"] = round(lambda_cards, 2)
+    probs_cards["expected_cards_base"] = round(lambda_cards_base, 2)
     probs_cards["home_cards_avg"] = round(home_cards, 2)
     probs_cards["away_cards_avg"] = round(away_cards, 2)
+    
+    # Aggiungi info arbitro
+    probs_cards.update(referee_info)
     
     return probs_cards
 

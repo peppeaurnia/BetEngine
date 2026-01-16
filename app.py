@@ -876,6 +876,35 @@ with col3:
         key="away_team"
     )
 
+# Input opzionale arbitro
+st.markdown("#### 👨‍⚖️ Arbitro (opzionale)")
+col_ref1, col_ref2 = st.columns([2, 1])
+with col_ref1:
+    referee_name = st.text_input(
+        "Nome arbitro",
+        placeholder="Es: Daniele Orsato, Marco Guida...",
+        help="Inserisci il nome dell'arbitro per calcolare le probabilità cartellini in base alla sua severità storica",
+        key="referee_input"
+    )
+with col_ref2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if referee_name:
+        try:
+            from fetch_referee_stats import get_referee_adjustment
+            ref_info = get_referee_adjustment(referee_name, selected_league_name)
+            if ref_info.get("found"):
+                severity = ref_info.get("severity_factor", 1.0)
+                if severity > 1.1:
+                    st.warning(f"🔴 Severo ({severity:.2f}x)")
+                elif severity < 0.9:
+                    st.success(f"🟢 Permissivo ({severity:.2f}x)")
+                else:
+                    st.info(f"🟡 Medio ({severity:.2f}x)")
+            else:
+                st.caption("Arbitro non nel database")
+        except:
+            pass
+
 # Pulsante calcola
 col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
 
@@ -913,7 +942,9 @@ if calculate_btn:
             home_stats, away_stats, selected_league_id,
             h2h_data=h2h_data,
             home_shots=home_shots,
-            away_shots=away_shots
+            away_shots=away_shots,
+            referee_name=referee_name if referee_name else None,
+            league_name=selected_league_name
         )
     
     # Valuta qualità previsione
@@ -1107,14 +1138,64 @@ if calculate_btn:
     # === CARTELLINI ===
     st.subheader("🟨 Cartellini - Tutte le Linee")
     
+    # Info arbitro se disponibile
+    if probabilities.get("referee_found"):
+        severity = probabilities.get("referee_severity", 1.0)
+        adj = probabilities.get("referee_adjustment", 1.0)
+        ref_avg = probabilities.get("referee_avg_cards")
+        ref_matches = probabilities.get("referee_matches", 0)
+        ref_name = probabilities.get("referee_name", "")
+        
+        if severity > 1.1:
+            ref_color = "#e74c3c"  # Rosso
+            ref_emoji = "🔴"
+            ref_label = "SEVERO"
+        elif severity < 0.9:
+            ref_color = "#27ae60"  # Verde
+            ref_emoji = "🟢"
+            ref_label = "PERMISSIVO"
+        else:
+            ref_color = "#f39c12"  # Giallo
+            ref_emoji = "🟡"
+            ref_label = "NELLA MEDIA"
+        
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, {ref_color}22, {ref_color}11); 
+                    border-left: 4px solid {ref_color}; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <strong style="font-size: 1.1em;">{ref_emoji} Arbitro: {ref_name}</strong>
+                    <span style="background: {ref_color}; color: white; padding: 2px 8px; border-radius: 12px; 
+                                 font-size: 0.75em; margin-left: 10px;">{ref_label}</span>
+                </div>
+                <div style="text-align: right;">
+                    <span style="font-size: 0.9em;">
+                        📊 {ref_avg:.1f} cart/partita | 
+                        ⚖️ Fattore: {severity:.2f}x | 
+                        🎮 {ref_matches} partite analizzate
+                    </span>
+                </div>
+            </div>
+            <div style="font-size: 0.85em; margin-top: 8px; opacity: 0.9;">
+                <em>Le probabilità cartellini sono state aggiustate del {((adj-1)*100):+.0f}% rispetto alla media</em>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    elif referee_name:
+        st.info(f"👨‍⚖️ Arbitro '{referee_name}' non trovato nel database. Usando probabilità standard.")
+    
     # Metriche cartellini
-    cards_col1, cards_col2, cards_col3 = st.columns(3)
+    cards_col1, cards_col2, cards_col3, cards_col4 = st.columns(4)
     with cards_col1:
         st.metric("🏠 Media Casa", f"{probabilities.get('home_cards_avg', 0):.2f}")
     with cards_col2:
         st.metric("✈️ Media Trasferta", f"{probabilities.get('away_cards_avg', 0):.2f}")
     with cards_col3:
-        st.metric("📊 Cartellini Attesi", f"{probabilities.get('expected_cards', 0):.2f}")
+        base_cards = probabilities.get('expected_cards_base', probabilities.get('expected_cards', 0))
+        st.metric("📊 Cartellini Base", f"{base_cards:.2f}")
+    with cards_col4:
+        st.metric("📊 Cartellini Attesi", f"{probabilities.get('expected_cards', 0):.2f}",
+                  delta=f"{probabilities.get('expected_cards', 0) - base_cards:+.2f}" if probabilities.get("referee_found") else None)
     
     # Grafico cartellini
     fig_cards = create_cards_comparison(probabilities)
