@@ -517,11 +517,17 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
     referee_data = None
     if referee_name:
         try:
+            # Prova import relativo (se usato come modulo)
             from .fetch_referee_stats import get_referee_adjustment
             referee_data = get_referee_adjustment(referee_name, league_name)
         except ImportError:
-            # Modulo non ancora disponibile o errore import
-            referee_data = {"found": False, "severity_factor": 1.0}
+            try:
+                # Prova import assoluto (se usato come script)
+                from fetch_referee_stats import get_referee_adjustment
+                referee_data = get_referee_adjustment(referee_name, league_name)
+            except ImportError:
+                # Modulo non disponibile
+                referee_data = {"found": False, "severity_factor": 1.0}
     
     # 8. Calcola probabilità cartellini con aggiustamento arbitro
     probs_cards = calculate_cards_probabilities(home_stats, away_stats, referee_data)

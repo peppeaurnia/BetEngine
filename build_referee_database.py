@@ -15,11 +15,9 @@ OUTPUT:
 import sys
 import os
 
-# Aggiungi directory corrente al path per import
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 # Import dal modulo
 from fetch_referee_stats import build_referee_database, save_database
+from config import API_FOOTBALL_KEY
 
 if __name__ == "__main__":
     print("=" * 60)
@@ -28,7 +26,6 @@ if __name__ == "__main__":
     print()
     
     # Verifica API key
-    from config import API_FOOTBALL_KEY
     if not API_FOOTBALL_KEY:
         print("❌ ERRORE: API_FOOTBALL_KEY non configurata!")
         print("   Imposta la variabile d'ambiente o modifica config.py")

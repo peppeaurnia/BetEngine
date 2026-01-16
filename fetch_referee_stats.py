@@ -16,7 +16,12 @@ import os
 from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Tuple
-from .config import BASE_URL, API_FOOTBALL_KEY
+
+# Import config (funziona sia come modulo che come script)
+try:
+    from .config import BASE_URL, API_FOOTBALL_KEY
+except ImportError:
+    from config import BASE_URL, API_FOOTBALL_KEY
 
 # ============================================================
 # CONFIGURAZIONE
