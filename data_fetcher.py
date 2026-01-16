@@ -496,6 +496,9 @@ def get_match_stats(api_key: str, home_team_id: int, away_team_id: int,
         "league_avg_gf_home": league_stats.get("avg_gf_home", 1.4),
         "league_avg_gf_away": league_stats.get("avg_gf_away", 1.1),
         "matches_played": home_stats_raw.get("fixtures_played_home", 0) + home_stats_raw.get("fixtures_played_away", 0),
+        "total_cards_avg": home_stats_raw.get("total_cards_avg", 1.9),
+        "yellow_cards_avg": home_stats_raw.get("yellow_cards_avg", 1.7),
+        "red_cards_avg": home_stats_raw.get("red_cards_avg", 0.1),
     }
     
     away_stats = {
@@ -515,6 +518,9 @@ def get_match_stats(api_key: str, home_team_id: int, away_team_id: int,
         "league_avg_gf_home": league_stats.get("avg_gf_home", 1.4),
         "league_avg_gf_away": league_stats.get("avg_gf_away", 1.1),
         "matches_played": away_stats_raw.get("fixtures_played_home", 0) + away_stats_raw.get("fixtures_played_away", 0),
+        "total_cards_avg": away_stats_raw.get("total_cards_avg", 1.9),
+        "yellow_cards_avg": away_stats_raw.get("yellow_cards_avg", 1.7),
+        "red_cards_avg": away_stats_raw.get("red_cards_avg", 0.1),
     }
     
     league_info = {
@@ -595,3 +601,334 @@ def test_api_connection(api_key: str) -> Tuple[bool, str]:
     
     except requests.exceptions.RequestException as e:
         return False, f"❌ Errore connessione: {str(e)}"
+
+
+# ============================================================
+# HEAD TO HEAD - Scontri diretti
+# ============================================================
+
+@st.cache_data(ttl=3600)
+def get_head_to_head(api_key: str, team1_id: int, team2_id: int, last_n: int = 10) -> Dict:
+    """
+    Recupera gli scontri diretti tra due squadre.
+    
+    Args:
+        api_key: Chiave API
+        team1_id: ID prima squadra
+        team2_id: ID seconda squadra
+        last_n: Numero di partite da recuperare
+    
+    Returns:
+        Dict con statistiche H2H
+    """
+    url = f"{BASE_URL}/fixtures/headtohead"
+    params = {
+        "h2h": f"{team1_id}-{team2_id}",
+        "last": last_n
+    }
+    
+    try:
+        response = requests.get(url, headers=_get_headers(api_key), params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        fixtures = data.get("response", [])
+        
+        if not fixtures:
+            return {"matches": 0, "team1_wins": 0, "team2_wins": 0, "draws": 0, "avg_goals": 0}
+        
+        team1_wins = 0
+        team2_wins = 0
+        draws = 0
+        total_goals = 0
+        
+        for match in fixtures:
+            home_id = match.get("teams", {}).get("home", {}).get("id")
+            away_id = match.get("teams", {}).get("away", {}).get("id")
+            home_goals = match.get("goals", {}).get("home", 0) or 0
+            away_goals = match.get("goals", {}).get("away", 0) or 0
+            
+            total_goals += home_goals + away_goals
+            
+            if home_goals > away_goals:
+                if home_id == team1_id:
+                    team1_wins += 1
+                else:
+                    team2_wins += 1
+            elif away_goals > home_goals:
+                if away_id == team1_id:
+                    team1_wins += 1
+                else:
+                    team2_wins += 1
+            else:
+                draws += 1
+        
+        return {
+            "matches": len(fixtures),
+            "team1_wins": team1_wins,
+            "team2_wins": team2_wins,
+            "draws": draws,
+            "avg_goals": round(total_goals / len(fixtures), 2) if fixtures else 0,
+            "fixtures": fixtures  # Per dettagli
+        }
+    
+    except Exception as e:
+        st.warning(f"Errore H2H: {e}")
+        return {"matches": 0, "team1_wins": 0, "team2_wins": 0, "draws": 0, "avg_goals": 0}
+
+
+# ============================================================
+# PREDICTIONS - Predizioni dell'API
+# ============================================================
+
+@st.cache_data(ttl=1800)
+def get_api_predictions(api_key: str, fixture_id: int) -> Dict:
+    """
+    Recupera le predizioni dell'API per una partita.
+    
+    Args:
+        api_key: Chiave API
+        fixture_id: ID della partita
+    
+    Returns:
+        Dict con predizioni
+    """
+    url = f"{BASE_URL}/predictions"
+    params = {"fixture": fixture_id}
+    
+    try:
+        response = requests.get(url, headers=_get_headers(api_key), params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        predictions = data.get("response", [])
+        
+        if not predictions:
+            return {}
+        
+        pred = predictions[0]
+        
+        return {
+            "winner": pred.get("predictions", {}).get("winner", {}),
+            "win_or_draw": pred.get("predictions", {}).get("win_or_draw"),
+            "under_over": pred.get("predictions", {}).get("under_over"),
+            "goals_home": pred.get("predictions", {}).get("goals", {}).get("home"),
+            "goals_away": pred.get("predictions", {}).get("goals", {}).get("away"),
+            "advice": pred.get("predictions", {}).get("advice"),
+            "percent": pred.get("predictions", {}).get("percent", {}),
+            "comparison": pred.get("comparison", {})
+        }
+    
+    except Exception as e:
+        st.warning(f"Errore Predictions: {e}")
+        return {}
+
+
+# ============================================================
+# INJURIES - Infortuni
+# ============================================================
+
+@st.cache_data(ttl=1800)
+def get_injuries(api_key: str, fixture_id: int) -> Dict:
+    """
+    Recupera gli infortuni per una partita.
+    
+    Args:
+        api_key: Chiave API
+        fixture_id: ID della partita
+    
+    Returns:
+        Dict con infortuni per squadra
+    """
+    url = f"{BASE_URL}/injuries"
+    params = {"fixture": fixture_id}
+    
+    try:
+        response = requests.get(url, headers=_get_headers(api_key), params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        injuries = data.get("response", [])
+        
+        home_injuries = []
+        away_injuries = []
+        
+        for injury in injuries:
+            player_info = {
+                "name": injury.get("player", {}).get("name"),
+                "photo": injury.get("player", {}).get("photo"),
+                "type": injury.get("player", {}).get("type"),  # "Missing Fixture" o "Questionable"
+                "reason": injury.get("player", {}).get("reason")
+            }
+            
+            team_id = injury.get("team", {}).get("id")
+            # Determina se è home o away (sarà gestito nel chiamante)
+            home_injuries.append({**player_info, "team_id": team_id})
+        
+        return {
+            "injuries": injuries,
+            "total": len(injuries)
+        }
+    
+    except Exception as e:
+        st.warning(f"Errore Injuries: {e}")
+        return {"injuries": [], "total": 0}
+
+
+# ============================================================
+# FIXTURE STATISTICS - Tiri e altre statistiche partita
+# ============================================================
+
+@st.cache_data(ttl=3600)
+def get_fixture_statistics(api_key: str, fixture_id: int) -> Dict:
+    """
+    Recupera le statistiche di una singola partita (tiri, possesso, ecc).
+    
+    Args:
+        api_key: Chiave API
+        fixture_id: ID della partita
+    
+    Returns:
+        Dict con statistiche
+    """
+    url = f"{BASE_URL}/fixtures/statistics"
+    params = {"fixture": fixture_id}
+    
+    try:
+        response = requests.get(url, headers=_get_headers(api_key), params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        stats = data.get("response", [])
+        
+        if len(stats) < 2:
+            return {}
+        
+        result = {}
+        
+        for team_stats in stats:
+            team_name = team_stats.get("team", {}).get("name")
+            team_id = team_stats.get("team", {}).get("id")
+            
+            stats_dict = {}
+            for stat in team_stats.get("statistics", []):
+                stat_type = stat.get("type")
+                stat_value = stat.get("value")
+                stats_dict[stat_type] = stat_value
+            
+            result[team_id] = {
+                "team_name": team_name,
+                "shots_total": _safe_int(stats_dict.get("Total Shots")),
+                "shots_on_target": _safe_int(stats_dict.get("Shots on Goal")),
+                "shots_off_target": _safe_int(stats_dict.get("Shots off Goal")),
+                "possession": stats_dict.get("Ball Possession"),
+                "corners": _safe_int(stats_dict.get("Corner Kicks")),
+                "fouls": _safe_int(stats_dict.get("Fouls")),
+                "offsides": _safe_int(stats_dict.get("Offsides")),
+                "yellow_cards": _safe_int(stats_dict.get("Yellow Cards")),
+                "red_cards": _safe_int(stats_dict.get("Red Cards")),
+                "saves": _safe_int(stats_dict.get("Goalkeeper Saves")),
+                "passes_total": _safe_int(stats_dict.get("Total passes")),
+                "passes_accurate": _safe_int(stats_dict.get("Passes accurate")),
+                "expected_goals": stats_dict.get("expected_goals")
+            }
+        
+        return result
+    
+    except Exception as e:
+        st.warning(f"Errore Fixture Statistics: {e}")
+        return {}
+
+
+def _safe_int(val) -> int:
+    """Converte in int in modo sicuro."""
+    try:
+        if val is None:
+            return 0
+        return int(val)
+    except (TypeError, ValueError):
+        return 0
+
+
+# ============================================================
+# TEAM RECENT FIXTURES - Per calcolare media tiri
+# ============================================================
+
+@st.cache_data(ttl=3600)
+def get_team_recent_fixtures(api_key: str, team_id: int, league_id: int, season: int, last_n: int = 5) -> List[int]:
+    """
+    Recupera gli ID delle ultime N partite giocate da una squadra.
+    
+    Args:
+        api_key: Chiave API
+        team_id: ID squadra
+        league_id: ID lega
+        season: Stagione
+        last_n: Numero di partite
+    
+    Returns:
+        Lista di fixture_id
+    """
+    url = f"{BASE_URL}/fixtures"
+    params = {
+        "team": team_id,
+        "league": league_id,
+        "season": season,
+        "last": last_n,
+        "status": "FT"  # Solo partite finite
+    }
+    
+    try:
+        response = requests.get(url, headers=_get_headers(api_key), params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        fixtures = data.get("response", [])
+        return [f.get("fixture", {}).get("id") for f in fixtures if f.get("fixture", {}).get("id")]
+    
+    except Exception as e:
+        st.warning(f"Errore Recent Fixtures: {e}")
+        return []
+
+
+@st.cache_data(ttl=3600)
+def get_team_shots_avg(api_key: str, team_id: int, league_id: int, season: int, last_n: int = 5) -> Dict:
+    """
+    Calcola la media tiri di una squadra nelle ultime N partite.
+    
+    Args:
+        api_key: Chiave API
+        team_id: ID squadra
+        league_id: ID lega
+        season: Stagione
+        last_n: Numero di partite
+    
+    Returns:
+        Dict con medie tiri
+    """
+    fixture_ids = get_team_recent_fixtures(api_key, team_id, league_id, season, last_n)
+    
+    if not fixture_ids:
+        return {"shots_avg": 0, "shots_on_target_avg": 0, "matches_analyzed": 0}
+    
+    total_shots = 0
+    total_on_target = 0
+    matches_counted = 0
+    
+    for fid in fixture_ids[:last_n]:  # Limita a last_n
+        stats = get_fixture_statistics(api_key, fid)
+        
+        if team_id in stats:
+            team_stats = stats[team_id]
+            total_shots += team_stats.get("shots_total", 0)
+            total_on_target += team_stats.get("shots_on_target", 0)
+            matches_counted += 1
+    
+    if matches_counted == 0:
+        return {"shots_avg": 0, "shots_on_target_avg": 0, "matches_analyzed": 0}
+    
+    return {
+        "shots_avg": round(total_shots / matches_counted, 1),
+        "shots_on_target_avg": round(total_on_target / matches_counted, 1),
+        "matches_analyzed": matches_counted
+    }

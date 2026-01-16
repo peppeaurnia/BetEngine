@@ -29,7 +29,12 @@ from probability_engine import (
 from data_fetcher import (
     LEAGUES,
     fetch_teams_for_league,
-    get_match_stats
+    get_match_stats,
+    get_head_to_head,
+    get_api_predictions,
+    get_injuries,
+    get_team_shots_avg,
+    get_current_season
 )
 from config import API_FOOTBALL_KEY, DEFAULT_LEAGUE
 from auth import (
@@ -893,6 +898,15 @@ if calculate_btn:
             api_key, home_team_id, away_team_id, selected_league_id, selected_season
         )
     
+    # Recupera dati aggiuntivi
+    with st.spinner("🔍 Recupero dati avanzati (H2H, Tiri, Infortuni)..."):
+        # Head to Head
+        h2h_data = get_head_to_head(api_key, home_team_id, away_team_id, last_n=10)
+        
+        # Media tiri ultime 5 partite
+        home_shots = get_team_shots_avg(api_key, home_team_id, selected_league_id, selected_season, last_n=5)
+        away_shots = get_team_shots_avg(api_key, away_team_id, selected_league_id, selected_season, last_n=5)
+    
     # Calcola probabilità
     with st.spinner("🧮 Calcolo probabilità..."):
         probabilities = calculate_match_probabilities(
@@ -1128,6 +1142,56 @@ if calculate_btn:
     
     cards_table += '</table>'
     st.markdown(cards_table, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # === HEAD TO HEAD ===
+    st.subheader("⚔️ Scontri Diretti (Ultimi 10)")
+    
+    if h2h_data.get("matches", 0) > 0:
+        h2h_col1, h2h_col2, h2h_col3, h2h_col4 = st.columns(4)
+        
+        with h2h_col1:
+            st.metric("Partite", h2h_data["matches"])
+        with h2h_col2:
+            st.metric(f"Vinte {home_team_name}", h2h_data["team1_wins"])
+        with h2h_col3:
+            st.metric("Pareggi", h2h_data["draws"])
+        with h2h_col4:
+            st.metric(f"Vinte {away_team_name}", h2h_data["team2_wins"])
+        
+        st.write(f"**Media gol negli scontri diretti:** {h2h_data['avg_goals']}")
+    else:
+        st.info("Nessuno scontro diretto trovato negli ultimi anni")
+    
+    st.markdown("---")
+    
+    # === TIRI ===
+    st.subheader("🎯 Media Tiri (Ultime 5 partite)")
+    
+    shots_col1, shots_col2 = st.columns(2)
+    
+    with shots_col1:
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg, #1a5f2a, #2d8a4e); padding:15px; border-radius:10px; text-align:center;">
+            <h4 style="margin:0; color:white;">{home_team_name}</h4>
+            <div style="font-size:2rem; font-weight:bold; color:white;">{home_shots.get('shots_avg', 'N/A')}</div>
+            <div style="font-size:0.9rem; color:#ccc;">Tiri totali/partita</div>
+            <div style="font-size:1.5rem; font-weight:bold; color:#4ade80; margin-top:5px;">{home_shots.get('shots_on_target_avg', 'N/A')}</div>
+            <div style="font-size:0.9rem; color:#ccc;">In porta/partita</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with shots_col2:
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg, #8b1538, #c41e3a); padding:15px; border-radius:10px; text-align:center;">
+            <h4 style="margin:0; color:white;">{away_team_name}</h4>
+            <div style="font-size:2rem; font-weight:bold; color:white;">{away_shots.get('shots_avg', 'N/A')}</div>
+            <div style="font-size:0.9rem; color:#ccc;">Tiri totali/partita</div>
+            <div style="font-size:1.5rem; font-weight:bold; color:#f87171; margin-top:5px;">{away_shots.get('shots_on_target_avg', 'N/A')}</div>
+            <div style="font-size:0.9rem; color:#ccc;">In porta/partita</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
