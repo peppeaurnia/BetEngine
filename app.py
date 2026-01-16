@@ -910,7 +910,10 @@ if calculate_btn:
     # Calcola probabilità
     with st.spinner("🧮 Calcolo probabilità..."):
         probabilities = calculate_match_probabilities(
-            home_stats, away_stats, selected_league_id
+            home_stats, away_stats, selected_league_id,
+            h2h_data=h2h_data,
+            home_shots=home_shots,
+            away_shots=away_shots
         )
     
     # Valuta qualità previsione

@@ -443,34 +443,58 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
 # ============================================================
 
 def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
-                                   league_id: int = None) -> Dict:
+                                   league_id: int = None,
+                                   h2h_data: Dict = None,
+                                   home_shots: Dict = None,
+                                   away_shots: Dict = None) -> Dict:
     """
     Calcola tutte le probabilità per un match.
     
     Questa è la funzione principale che orchestra tutti i calcoli:
     1. Calcola μ per entrambe le squadre
-    2. Calcola λ₃ per la correlazione
-    3. Costruisce la matrice Poisson bivariata
-    4. Estrae tutte le probabilità
+    2. Applica aggiustamenti H2H e tiri
+    3. Calcola λ₃ per la correlazione
+    4. Costruisce la matrice Poisson bivariata
+    5. Estrae tutte le probabilità
     
     Args:
         home_stats: Dict con statistiche squadra casa
         away_stats: Dict con statistiche squadra trasferta
         league_id: ID della lega
+        h2h_data: Dict con dati scontri diretti
+        home_shots: Dict con media tiri squadra casa
+        away_shots: Dict con media tiri squadra trasferta
     
     Returns:
         Dict completo con tutte le probabilità e metriche
     """
-    # 1. Calcola expected goals
+    # 1. Calcola expected goals base
     mu_home, mu_away = calculate_expected_goals(home_stats, away_stats, league_id)
     
-    # 2. Calcola λ₃
-    lambda3 = get_lambda3(mu_home, mu_away, league_id)
+    # 2. Applica aggiustamento H2H
+    h2h_adj_home, h2h_adj_away, h2h_goals_boost = calculate_h2h_adjustment(h2h_data)
+    mu_home *= h2h_adj_home
+    mu_away *= h2h_adj_away
     
-    # 3. Costruisci matrice
+    # 3. Applica aggiustamento tiri
+    shots_adj_home = calculate_shots_adjustment(home_shots)
+    shots_adj_away = calculate_shots_adjustment(away_shots)
+    mu_home *= shots_adj_home
+    mu_away *= shots_adj_away
+    
+    # Ri-applica clamping dopo aggiustamenti
+    mu_home = clamp_lambda(mu_home)
+    mu_away = clamp_lambda(mu_away)
+    
+    # 4. Calcola λ₃ (aumentato se H2H ha tanti gol)
+    lambda3 = get_lambda3(mu_home, mu_away, league_id)
+    if h2h_goals_boost > 0:
+        lambda3 = min(lambda3 * (1 + h2h_goals_boost * 0.1), 0.15)
+    
+    # 5. Costruisci matrice
     M = bivariate_poisson_matrix(mu_home, mu_away, lambda3)
     
-    # 4. Calcola tutte le probabilità
+    # 6. Calcola tutte le probabilità
     probs_1x2 = calculate_1x2(M)
     probs_btts = calculate_btts(M)
     
@@ -484,7 +508,7 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
     # Punteggi esatti più probabili
     exact_scores = calculate_exact_scores(M, top_n=10)
     
-    # 5. Calcola probabilità cartellini
+    # 7. Calcola probabilità cartellini
     probs_cards = calculate_cards_probabilities(home_stats, away_stats)
     
     return {
@@ -493,6 +517,12 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         "mu_away": round(mu_away, 3),
         "lambda3": round(lambda3, 4),
         "total_expected_goals": round(mu_home + mu_away, 2),
+        
+        # Aggiustamenti applicati (per debug/trasparenza)
+        "h2h_adj_home": round(h2h_adj_home, 3),
+        "h2h_adj_away": round(h2h_adj_away, 3),
+        "shots_adj_home": round(shots_adj_home, 3),
+        "shots_adj_away": round(shots_adj_away, 3),
         
         # 1X2
         **probs_1x2,
@@ -512,6 +542,88 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         # Matrice (per visualizzazione avanzata)
         "matrix": M
     }
+
+
+def calculate_h2h_adjustment(h2h_data: Dict) -> Tuple[float, float, float]:
+    """
+    Calcola gli aggiustamenti basati sugli scontri diretti.
+    
+    Args:
+        h2h_data: Dict con matches, team1_wins, team2_wins, draws, avg_goals
+    
+    Returns:
+        Tuple (adj_home, adj_away, goals_boost)
+    """
+    if not h2h_data or h2h_data.get("matches", 0) < 3:
+        # Non abbastanza dati H2H, nessun aggiustamento
+        return 1.0, 1.0, 0.0
+    
+    matches = h2h_data["matches"]
+    team1_wins = h2h_data.get("team1_wins", 0)
+    team2_wins = h2h_data.get("team2_wins", 0)
+    draws = h2h_data.get("draws", 0)
+    avg_goals = h2h_data.get("avg_goals", 2.5)
+    
+    # Calcola dominanza (% vittorie)
+    team1_dominance = team1_wins / matches if matches > 0 else 0.5
+    team2_dominance = team2_wins / matches if matches > 0 else 0.5
+    
+    # Aggiustamento basato sulla dominanza H2H
+    # Se team1 vince 70% degli H2H -> boost +10%
+    # Se team1 vince 30% degli H2H -> penalità -10%
+    adj_home = 1.0 + (team1_dominance - 0.5) * 0.20  # Max ±10%
+    adj_away = 1.0 + (team2_dominance - 0.5) * 0.20
+    
+    # Clamp per evitare estremi
+    adj_home = np.clip(adj_home, 0.90, 1.15)
+    adj_away = np.clip(adj_away, 0.90, 1.15)
+    
+    # Goals boost: se media gol H2H è alta, aumenta probabilità Over
+    # Media normale ~2.5 gol, se >3.0 -> boost positivo
+    goals_boost = (avg_goals - 2.5) / 2.5 if avg_goals > 2.5 else 0
+    goals_boost = np.clip(goals_boost, 0, 0.3)  # Max +30%
+    
+    return adj_home, adj_away, goals_boost
+
+
+def calculate_shots_adjustment(shots_data: Dict) -> float:
+    """
+    Calcola l'aggiustamento basato sui tiri.
+    
+    Logica: Una squadra che tira molto ha più possibilità di segnare.
+    Media Serie A: ~12-13 tiri per partita
+    
+    Args:
+        shots_data: Dict con shots_avg, shots_on_target_avg
+    
+    Returns:
+        Fattore di aggiustamento (0.90 - 1.15)
+    """
+    if not shots_data or shots_data.get("matches_analyzed", 0) == 0:
+        return 1.0
+    
+    shots_avg = shots_data.get("shots_avg", 12)
+    shots_on_target = shots_data.get("shots_on_target_avg", 4)
+    
+    # Media di riferimento (tipica Serie A / top league)
+    REFERENCE_SHOTS = 12.0
+    REFERENCE_ON_TARGET = 4.0
+    
+    # Calcola deviazione dalla media
+    shots_factor = shots_avg / REFERENCE_SHOTS if REFERENCE_SHOTS > 0 else 1.0
+    on_target_factor = shots_on_target / REFERENCE_ON_TARGET if REFERENCE_ON_TARGET > 0 else 1.0
+    
+    # Combina i due fattori (tiri in porta contano di più)
+    combined = 0.4 * shots_factor + 0.6 * on_target_factor
+    
+    # Trasforma in aggiustamento moderato
+    # combined = 1.0 -> adj = 1.0
+    # combined = 1.5 -> adj = 1.10 (+10%)
+    # combined = 0.5 -> adj = 0.90 (-10%)
+    adjustment = 1.0 + (combined - 1.0) * 0.20
+    
+    # Clamp
+    return float(np.clip(adjustment, 0.90, 1.15))
 
 
 def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict) -> Dict:
