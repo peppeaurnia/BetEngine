@@ -40,8 +40,9 @@ LEAGUES_TO_ANALYZE = {
     2: "Champions League"
 }
 
-# Stagioni da analizzare (più stagioni = dati più affidabili)
-SEASONS_TO_ANALYZE = [2024, 2023]
+# Stagioni da analizzare (1 stagione = meno chiamate API)
+# Ogni lega + stagione costa ~20 chiamate API
+SEASONS_TO_ANALYZE = [2024]  # Solo stagione corrente
 
 # File di output
 OUTPUT_FILE = "referee_data.json"
@@ -56,17 +57,21 @@ def get_headers() -> Dict:
     return {"x-apisports-key": API_FOOTBALL_KEY}
 
 
-def fetch_finished_fixtures(league_id: int, season: int) -> List[Dict]:
+def fetch_finished_fixtures(league_id: int, season: int) -> Tuple[List[Dict], int]:
     """
     Scarica tutte le partite finite di una lega/stagione.
+    Prima ottiene la lista ID, poi scarica i dettagli con eventi in batch.
     
     Args:
         league_id: ID della lega
         season: Anno della stagione
     
     Returns:
-        Lista di fixtures con eventi
+        Tuple (Lista di fixtures con eventi, numero chiamate API)
     """
+    api_calls = 0
+    
+    # STEP 1: Ottieni lista delle partite finite (solo ID)
     url = f"{BASE_URL}/fixtures"
     params = {
         "league": league_id,
@@ -76,20 +81,58 @@ def fetch_finished_fixtures(league_id: int, season: int) -> List[Dict]:
     
     try:
         response = requests.get(url, headers=get_headers(), params=params, timeout=30)
+        api_calls += 1
         response.raise_for_status()
         data = response.json()
         
         if data.get("errors"):
             print(f"  ⚠️ Errore API: {data['errors']}")
-            return []
+            return [], api_calls
         
-        fixtures = data.get("response", [])
-        print(f"  ✅ Trovate {len(fixtures)} partite")
-        return fixtures
+        fixtures_basic = data.get("response", [])
+        print(f"  ✅ Trovate {len(fixtures_basic)} partite finite")
+        
+        if not fixtures_basic:
+            return [], api_calls
+        
+        # STEP 2: Scarica dettagli con eventi in batch di 20
+        all_fixtures_with_events = []
+        fixture_ids = [fx["fixture"]["id"] for fx in fixtures_basic]
+        
+        # Dividi in batch di 20
+        batch_size = 20
+        batches = [fixture_ids[i:i+batch_size] for i in range(0, len(fixture_ids), batch_size)]
+        
+        print(f"  📦 Scarico eventi in {len(batches)} batch...")
+        
+        for i, batch in enumerate(batches):
+            ids_str = "-".join(str(id) for id in batch)
+            batch_url = f"{BASE_URL}/fixtures"
+            batch_params = {"ids": ids_str}
+            
+            try:
+                batch_response = requests.get(batch_url, headers=get_headers(), params=batch_params, timeout=30)
+                api_calls += 1
+                batch_response.raise_for_status()
+                batch_data = batch_response.json()
+                
+                if batch_data.get("response"):
+                    all_fixtures_with_events.extend(batch_data["response"])
+                
+                # Progress ogni 5 batch
+                if (i + 1) % 5 == 0:
+                    print(f"    Batch {i+1}/{len(batches)} completato...")
+                    
+            except Exception as e:
+                print(f"    ⚠️ Errore batch {i+1}: {e}")
+                continue
+        
+        print(f"  ✅ Scaricate {len(all_fixtures_with_events)} partite con eventi ({api_calls} chiamate)")
+        return all_fixtures_with_events, api_calls
         
     except Exception as e:
         print(f"  ❌ Errore: {e}")
-        return []
+        return [], api_calls
 
 
 def fetch_fixture_events(fixture_id: int) -> List[Dict]:
@@ -213,9 +256,15 @@ def build_referee_database() -> Dict:
     Returns:
         Dict con tutti i dati arbitri e medie per lega
     """
+    # Stima costo API
+    estimated_matches_per_league = 380  # Circa
+    batches_per_league = (estimated_matches_per_league // 20) + 1
+    total_estimated_calls = len(LEAGUES_TO_ANALYZE) * len(SEASONS_TO_ANALYZE) * (batches_per_league + 1)
+    
     print("🏃 Avvio costruzione database arbitri...")
     print(f"📊 Leghe da analizzare: {list(LEAGUES_TO_ANALYZE.values())}")
     print(f"📅 Stagioni: {SEASONS_TO_ANALYZE}")
+    print(f"💰 Chiamate API stimate: ~{total_estimated_calls}")
     print("-" * 50)
     
     all_referee_stats = defaultdict(lambda: {
@@ -242,8 +291,8 @@ def build_referee_database() -> Dict:
         for season in SEASONS_TO_ANALYZE:
             print(f"  📅 Stagione {season}...")
             
-            fixtures = fetch_finished_fixtures(league_id, season)
-            api_calls += 1
+            fixtures, calls_used = fetch_finished_fixtures(league_id, season)
+            api_calls += calls_used
             
             if not fixtures:
                 continue
@@ -297,7 +346,15 @@ def build_referee_database() -> Dict:
             }
     
     # Calcola severity factor per ogni arbitro rispetto alla media globale
-    global_avg = sum(la["avg_cards"] for la in league_averages.values()) / len(league_averages) if league_averages else 4.0
+    if league_averages:
+        valid_avgs = [la["avg_cards"] for la in league_averages.values() if la["avg_cards"] > 0]
+        global_avg = sum(valid_avgs) / len(valid_avgs) if valid_avgs else 4.0
+    else:
+        global_avg = 4.0  # Default se nessun dato
+    
+    # Evita divisione per zero
+    if global_avg == 0:
+        global_avg = 4.0
     
     for ref_name, stats in final_referees.items():
         stats["severity_factor"] = round(stats["avg_cards_per_match"] / global_avg, 3)
