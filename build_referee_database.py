@@ -15,9 +15,14 @@ OUTPUT:
 import sys
 import os
 
-# Import dal modulo
+# Carica API key
+try:
+    from config import API_FOOTBALL_KEY
+except ImportError:
+    API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
+
+# Import funzioni
 from fetch_referee_stats import build_referee_database, save_database
-from config import API_FOOTBALL_KEY
 
 if __name__ == "__main__":
     print("=" * 60)

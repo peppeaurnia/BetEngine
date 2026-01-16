@@ -17,11 +17,14 @@ from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
-# Import config (funziona sia come modulo che come script)
+# Costanti API
+BASE_URL = "https://v3.football.api-sports.io"
+
+# Carica API key da config o variabile ambiente
 try:
-    from .config import BASE_URL, API_FOOTBALL_KEY
+    from config import API_FOOTBALL_KEY
 except ImportError:
-    from config import BASE_URL, API_FOOTBALL_KEY
+    API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
 
 # ============================================================
 # CONFIGURAZIONE
