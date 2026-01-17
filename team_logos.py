@@ -11,8 +11,25 @@ import base64
 from pathlib import Path
 from typing import Optional, Dict
 
-# Percorso base della cartella Loghi (relativo alla cartella dell'app)
-LOGOS_BASE_PATH = os.path.join(os.path.dirname(__file__), "Loghi")
+# Percorso base della cartella Loghi - cerca in più posizioni
+def _find_logos_path():
+    """Trova la cartella Loghi cercando in varie posizioni."""
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), "Loghi"),  # Stessa cartella dello script
+        os.path.join(os.getcwd(), "Loghi"),  # Directory corrente
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Loghi"),  # Path assoluto
+        "Loghi",  # Relativo
+        os.path.join("..", "Loghi"),  # Cartella parent
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path) and os.path.isdir(path):
+            return path
+    
+    # Fallback: usa il primo path anche se non esiste
+    return possible_paths[0]
+
+LOGOS_BASE_PATH = _find_logos_path()
 
 # ============================================================
 # MAPPING NOMI API -> FILE LOGHI
@@ -406,27 +423,31 @@ def get_match_header_html(home_team: str, away_team: str, logo_size: int = 50) -
     Returns:
         Stringa HTML completa
     """
-    home_logo = get_logo_base64(home_team, logo_size)
-    away_logo = get_logo_base64(away_team, logo_size)
+    try:
+        home_logo = get_logo_base64(home_team, logo_size)
+        away_logo = get_logo_base64(away_team, logo_size)
+    except Exception as e:
+        print(f"⚠️ Errore caricamento loghi: {e}")
+        home_logo = None
+        away_logo = None
     
     # Logo casa (o placeholder)
-    if home_logo:
+    if home_logo and len(home_logo) < 500000:  # Limita dimensione base64
         home_logo_html = f'<img src="{home_logo}" style="width:{logo_size}px; height:{logo_size}px; object-fit:contain;">'
     else:
-        home_logo_html = f'<div style="width:{logo_size}px; height:{logo_size}px; background:#3498db; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:20px;">🏠</div>'
+        home_logo_html = f'<div style="width:{logo_size}px; height:{logo_size}px; background:#3498db; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:24px;">🏠</div>'
     
     # Logo trasferta (o placeholder)
-    if away_logo:
+    if away_logo and len(away_logo) < 500000:
         away_logo_html = f'<img src="{away_logo}" style="width:{logo_size}px; height:{logo_size}px; object-fit:contain;">'
     else:
-        away_logo_html = f'<div style="width:{logo_size}px; height:{logo_size}px; background:#e74c3c; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:20px;">✈️</div>'
+        away_logo_html = f'<div style="width:{logo_size}px; height:{logo_size}px; background:#e74c3c; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:24px;">✈️</div>'
     
     html = f'''
     <div style="display:flex; align-items:center; justify-content:center; padding:20px; 
                 background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%);
                 border-radius:15px; margin:10px 0;">
         
-        <!-- Squadra Casa -->
         <div style="display:flex; align-items:center; flex:1; justify-content:flex-end;">
             {home_logo_html}
             <span style="margin-left:15px; font-size:1.4em; font-weight:700; color:#ffffff;">
@@ -434,12 +455,10 @@ def get_match_header_html(home_team: str, away_team: str, logo_size: int = 50) -
             </span>
         </div>
         
-        <!-- VS -->
         <div style="margin:0 30px; padding:10px 20px; background:rgba(255,255,255,0.1); border-radius:10px;">
             <span style="font-size:1.2em; font-weight:600; color:#f39c12;">VS</span>
         </div>
         
-        <!-- Squadra Trasferta -->
         <div style="display:flex; align-items:center; flex:1; justify-content:flex-start;">
             <span style="margin-right:15px; font-size:1.4em; font-weight:700; color:#ffffff;">
                 {away_team}
@@ -451,6 +470,32 @@ def get_match_header_html(home_team: str, away_team: str, logo_size: int = 50) -
     '''
     
     return html
+
+
+def get_match_header_simple(home_team: str, away_team: str) -> str:
+    """
+    Versione semplificata dell'header senza loghi (fallback).
+    """
+    return f'''
+    <div style="display:flex; align-items:center; justify-content:center; padding:20px; 
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%);
+                border-radius:15px; margin:10px 0;">
+        
+        <span style="font-size:1.5em; font-weight:700; color:#ffffff;">
+            🏠 {home_team}
+        </span>
+        
+        <span style="margin:0 25px; padding:8px 16px; background:rgba(255,255,255,0.1); 
+                     border-radius:8px; font-size:1.2em; font-weight:600; color:#f39c12;">
+            VS
+        </span>
+        
+        <span style="font-size:1.5em; font-weight:700; color:#ffffff;">
+            {away_team} ✈️
+        </span>
+        
+    </div>
+    '''
 
 
 def check_logos_availability(teams: list) -> Dict[str, bool]:

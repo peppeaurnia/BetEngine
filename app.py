@@ -36,7 +36,7 @@ from data_fetcher import (
     get_team_shots_avg,
     get_current_season
 )
-from team_logos import get_match_header_html
+from team_logos import get_match_header_html, get_match_header_simple
 from config import API_FOOTBALL_KEY, DEFAULT_LEAGUE
 from auth import (
     init_session,
@@ -953,8 +953,13 @@ if calculate_btn:
     quality = assess_prediction_quality(home_stats, away_stats)
     
     # === SEZIONE RISULTATI ===
-    # Header con loghi squadre
-    match_header = get_match_header_html(home_team_name, away_team_name, logo_size=55)
+    # Header con loghi squadre (con fallback se errore)
+    try:
+        match_header = get_match_header_html(home_team_name, away_team_name, logo_size=55)
+    except Exception as e:
+        st.warning(f"⚠️ Errore caricamento loghi: {e}")
+        match_header = get_match_header_simple(home_team_name, away_team_name)
+    
     st.markdown(match_header, unsafe_allow_html=True)
     
     # Indicatore qualità
