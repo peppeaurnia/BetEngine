@@ -192,13 +192,13 @@ def extract_referee_stats(fixtures: List[Dict], league_name: str) -> Dict:
         referee_clean = referee_name.split(",")[0].strip()
         
         # Conta cartellini dagli eventi
-        events = fx.get("events", [])
+        events = fx.get("events", []) or []
         yellow = 0
         red = 0
         
         for event in events:
-            event_type = event.get("type", "").lower()
-            detail = event.get("detail", "").lower()
+            event_type = (event.get("type") or "").lower()
+            detail = (event.get("detail") or "").lower()
             
             if event_type == "card":
                 if "yellow" in detail and "red" not in detail:
