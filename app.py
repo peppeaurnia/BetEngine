@@ -36,7 +36,7 @@ from data_fetcher import (
     get_team_shots_avg,
     get_current_season
 )
-from team_logos import get_match_header_html, get_logo_base64
+from team_logos import get_match_header_html
 from config import API_FOOTBALL_KEY, DEFAULT_LEAGUE
 from auth import (
     init_session,
@@ -985,12 +985,6 @@ if calculate_btn:
     # === 1X2 ===
     st.subheader("🎲 Esito Finale (1X2)")
     
-    # Prepara loghi per le card
-    home_logo_b64 = get_logo_base64(home_team_name, 30)
-    away_logo_b64 = get_logo_base64(away_team_name, 30)
-    home_logo_img = f'<img src="{home_logo_b64}" style="width:28px; height:28px; object-fit:contain; vertical-align:middle; margin-right:8px;">' if home_logo_b64 else '🏠 '
-    away_logo_img = f'<img src="{away_logo_b64}" style="width:28px; height:28px; object-fit:contain; vertical-align:middle; margin-right:8px;">' if away_logo_b64 else '✈️ '
-    
     col_1x2_1, col_1x2_2, col_1x2_3 = st.columns(3)
     
     with col_1x2_1:
@@ -998,7 +992,7 @@ if calculate_btn:
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #3498db, #2980b9); color:white; 
                     padding:20px; border-radius:15px; text-align:center;">
-            <div style="font-size:0.9rem;">{home_logo_img}{home_team_name}</div>
+            <div style="font-size:0.9rem;">🏠 {home_team_name}</div>
             <div style="font-size:2.5rem; font-weight:bold;">{p_home:.1f}%</div>
             <div style="font-size:0.8rem; opacity:0.8;">Quota implicita: {100/p_home:.2f}</div>
         </div>
@@ -1020,7 +1014,7 @@ if calculate_btn:
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #e74c3c, #c0392b); color:white; 
                     padding:20px; border-radius:15px; text-align:center;">
-            <div style="font-size:0.9rem;">{away_logo_img}{away_team_name}</div>
+            <div style="font-size:0.9rem;">✈️ {away_team_name}</div>
             <div style="font-size:2.5rem; font-weight:bold;">{p_away:.1f}%</div>
             <div style="font-size:0.8rem; opacity:0.8;">Quota implicita: {100/p_away:.2f}</div>
         </div>
