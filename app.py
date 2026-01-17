@@ -36,7 +36,7 @@ from data_fetcher import (
     get_team_shots_avg,
     get_current_season
 )
-from team_logos import get_match_header_html, get_match_header_simple
+from team_logos import get_logo_path
 from config import API_FOOTBALL_KEY, DEFAULT_LEAGUE
 from auth import (
     init_session,
@@ -953,14 +953,53 @@ if calculate_btn:
     quality = assess_prediction_quality(home_stats, away_stats)
     
     # === SEZIONE RISULTATI ===
-    # Header con loghi squadre (con fallback se errore)
+    # Header con loghi squadre usando st.image nativo
     try:
-        match_header = get_match_header_html(home_team_name, away_team_name, logo_size=55)
+        home_logo_path = get_logo_path(home_team_name)
+        away_logo_path = get_logo_path(away_team_name)
+        
+        # Layout: [Logo] Nome Casa    VS    Nome Trasferta [Logo]
+        col_h_logo, col_h_name, col_vs, col_a_name, col_a_logo = st.columns([1, 3, 1, 3, 1])
+        
+        with col_h_logo:
+            if home_logo_path:
+                st.image(home_logo_path, width=55)
+            else:
+                st.markdown("<div style='font-size:40px; text-align:center;'>🏠</div>", unsafe_allow_html=True)
+        
+        with col_h_name:
+            st.markdown(f"""
+            <div style="display:flex; align-items:center; height:55px; justify-content:flex-start;">
+                <span style="font-size:1.4em; font-weight:700;">{home_team_name}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_vs:
+            st.markdown("""
+            <div style="display:flex; align-items:center; justify-content:center; height:55px;">
+                <span style="background:#f39c12; color:white; padding:8px 16px; border-radius:8px; 
+                             font-size:1.1em; font-weight:700;">VS</span>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_a_name:
+            st.markdown(f"""
+            <div style="display:flex; align-items:center; height:55px; justify-content:flex-end;">
+                <span style="font-size:1.4em; font-weight:700;">{away_team_name}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col_a_logo:
+            if away_logo_path:
+                st.image(away_logo_path, width=55)
+            else:
+                st.markdown("<div style='font-size:40px; text-align:center;'>✈️</div>", unsafe_allow_html=True)
+                
     except Exception as e:
-        st.warning(f"⚠️ Errore caricamento loghi: {e}")
-        match_header = get_match_header_simple(home_team_name, away_team_name)
-    
-    st.markdown(match_header, unsafe_allow_html=True)
+        # Fallback semplice
+        st.markdown(f"""
+        <h2 style="text-align:center;">🏠 {home_team_name} &nbsp; VS &nbsp; {away_team_name} ✈️</h2>
+        """, unsafe_allow_html=True)
     
     # Indicatore qualità
     st.markdown(f"""
