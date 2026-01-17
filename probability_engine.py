@@ -545,9 +545,6 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         "shots_adj_home": round(shots_adj_home, 3),
         "shots_adj_away": round(shots_adj_away, 3),
         
-        # Info arbitro
-        "referee_name": referee_name,
-        
         # 1X2
         **probs_1x2,
         
@@ -557,7 +554,7 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         # Over/Under
         **probs_ou,
         
-        # Cartellini
+        # Cartellini (include anche info arbitro: referee_name, referee_found, etc.)
         **probs_cards,
         
         # Punteggi esatti
@@ -700,6 +697,7 @@ def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict,
         
         referee_info = {
             "referee_found": True,
+            "referee_name": referee_data.get("name", ""),  # Nome completo dal database
             "referee_severity": round(severity, 3),
             "referee_adjustment": round(referee_adjustment, 3),
             "referee_avg_cards": referee_data.get("avg_cards"),
@@ -708,6 +706,7 @@ def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict,
     else:
         referee_info = {
             "referee_found": False,
+            "referee_name": None,
             "referee_severity": 1.0,
             "referee_adjustment": 1.0,
             "referee_avg_cards": None,

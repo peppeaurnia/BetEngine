@@ -1,0 +1,1504 @@
+{
+  "last_updated": "2026-01-17T02:18:40.174012",
+  "api_calls_used": 109,
+  "seasons_analyzed": [
+    2024
+  ],
+  "league_averages": {
+    "Serie A": {
+      "avg_cards": 4.09,
+      "avg_yellow": 3.89,
+      "total_matches_analyzed": 380
+    },
+    "Premier League": {
+      "avg_cards": 4.34,
+      "avg_yellow": 4.2,
+      "total_matches_analyzed": 380
+    },
+    "Bundesliga": {
+      "avg_cards": 4.06,
+      "avg_yellow": 3.88,
+      "total_matches_analyzed": 308
+    },
+    "Ligue 1": {
+      "avg_cards": 4.03,
+      "avg_yellow": 3.81,
+      "total_matches_analyzed": 307
+    },
+    "La Liga": {
+      "avg_cards": 4.71,
+      "avg_yellow": 4.5,
+      "total_matches_analyzed": 380
+    },
+    "Champions League": {
+      "avg_cards": 4.27,
+      "avg_yellow": 4.09,
+      "total_matches_analyzed": 269
+    }
+  },
+  "global_average_cards": 4.25,
+  "referees": {
+    "L. Marinelli": {
+      "matches": 17,
+      "yellow_cards": 54,
+      "red_cards": 3,
+      "total_cards": 57,
+      "avg_cards_per_match": 3.35,
+      "avg_yellow_per_match": 3.18,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.788
+    },
+    "M. Fabbri": {
+      "matches": 18,
+      "yellow_cards": 75,
+      "red_cards": 6,
+      "total_cards": 81,
+      "avg_cards_per_match": 4.5,
+      "avg_yellow_per_match": 4.17,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.059
+    },
+    "E. Feliciani": {
+      "matches": 10,
+      "yellow_cards": 25,
+      "red_cards": 0,
+      "total_cards": 25,
+      "avg_cards_per_match": 2.5,
+      "avg_yellow_per_match": 2.5,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.588
+    },
+    "M. Marchetti": {
+      "matches": 12,
+      "yellow_cards": 48,
+      "red_cards": 3,
+      "total_cards": 51,
+      "avg_cards_per_match": 4.25,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.0
+    },
+    "M. Marcenaro": {
+      "matches": 8,
+      "yellow_cards": 42,
+      "red_cards": 3,
+      "total_cards": 45,
+      "avg_cards_per_match": 5.62,
+      "avg_yellow_per_match": 5.25,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.322
+    },
+    "P. Tremolada": {
+      "matches": 5,
+      "yellow_cards": 25,
+      "red_cards": 2,
+      "total_cards": 27,
+      "avg_cards_per_match": 5.4,
+      "avg_yellow_per_match": 5.0,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.271
+    },
+    "D. Massa": {
+      "matches": 28,
+      "yellow_cards": 108,
+      "red_cards": 7,
+      "total_cards": 115,
+      "avg_cards_per_match": 4.11,
+      "avg_yellow_per_match": 3.86,
+      "leagues": [
+        "Serie A",
+        "Champions League"
+      ],
+      "severity_factor": 0.967
+    },
+    "F. Maresca": {
+      "matches": 8,
+      "yellow_cards": 35,
+      "red_cards": 2,
+      "total_cards": 37,
+      "avg_cards_per_match": 4.62,
+      "avg_yellow_per_match": 4.38,
+      "leagues": [
+        "Serie A",
+        "Champions League"
+      ],
+      "severity_factor": 1.087
+    },
+    "G. Ayroldi": {
+      "matches": 11,
+      "yellow_cards": 69,
+      "red_cards": 6,
+      "total_cards": 75,
+      "avg_cards_per_match": 6.82,
+      "avg_yellow_per_match": 6.27,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.605
+    },
+    "M. Di Bello": {
+      "matches": 15,
+      "yellow_cards": 39,
+      "red_cards": 2,
+      "total_cards": 41,
+      "avg_cards_per_match": 2.73,
+      "avg_yellow_per_match": 2.6,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.642
+    },
+    "S. Sozza": {
+      "matches": 18,
+      "yellow_cards": 67,
+      "red_cards": 1,
+      "total_cards": 68,
+      "avg_cards_per_match": 3.78,
+      "avg_yellow_per_match": 3.72,
+      "leagues": [
+        "Serie A",
+        "Champions League"
+      ],
+      "severity_factor": 0.889
+    },
+    "A. Giua": {
+      "matches": 5,
+      "yellow_cards": 21,
+      "red_cards": 1,
+      "total_cards": 22,
+      "avg_cards_per_match": 4.4,
+      "avg_yellow_per_match": 4.2,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.035
+    },
+    "M. Mariani": {
+      "matches": 25,
+      "yellow_cards": 96,
+      "red_cards": 4,
+      "total_cards": 100,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.84,
+      "leagues": [
+        "Serie A",
+        "Champions League"
+      ],
+      "severity_factor": 0.941
+    },
+    "L. Pairetto": {
+      "matches": 14,
+      "yellow_cards": 66,
+      "red_cards": 7,
+      "total_cards": 73,
+      "avg_cards_per_match": 5.21,
+      "avg_yellow_per_match": 4.71,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.226
+    },
+    "J. Sacchi": {
+      "matches": 11,
+      "yellow_cards": 37,
+      "red_cards": 2,
+      "total_cards": 39,
+      "avg_cards_per_match": 3.55,
+      "avg_yellow_per_match": 3.36,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.835
+    },
+    "L. Zufferli": {
+      "matches": 15,
+      "yellow_cards": 43,
+      "red_cards": 3,
+      "total_cards": 46,
+      "avg_cards_per_match": 3.07,
+      "avg_yellow_per_match": 2.87,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.722
+    },
+    "A. Rapuano": {
+      "matches": 14,
+      "yellow_cards": 71,
+      "red_cards": 5,
+      "total_cards": 76,
+      "avg_cards_per_match": 5.43,
+      "avg_yellow_per_match": 5.07,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.278
+    },
+    "D. Doveri": {
+      "matches": 18,
+      "yellow_cards": 47,
+      "red_cards": 1,
+      "total_cards": 48,
+      "avg_cards_per_match": 2.67,
+      "avg_yellow_per_match": 2.61,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.628
+    },
+    "A. Colombo": {
+      "matches": 16,
+      "yellow_cards": 68,
+      "red_cards": 2,
+      "total_cards": 70,
+      "avg_cards_per_match": 4.38,
+      "avg_yellow_per_match": 4.25,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.031
+    },
+    "M. Guida": {
+      "matches": 11,
+      "yellow_cards": 45,
+      "red_cards": 3,
+      "total_cards": 48,
+      "avg_cards_per_match": 4.36,
+      "avg_yellow_per_match": 4.09,
+      "leagues": [
+        "Serie A",
+        "Champions League"
+      ],
+      "severity_factor": 1.026
+    },
+    "F. La Penna": {
+      "matches": 14,
+      "yellow_cards": 63,
+      "red_cards": 1,
+      "total_cards": 64,
+      "avg_cards_per_match": 4.57,
+      "avg_yellow_per_match": 4.5,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.075
+    },
+    "M. Piccinini": {
+      "matches": 16,
+      "yellow_cards": 61,
+      "red_cards": 1,
+      "total_cards": 62,
+      "avg_cards_per_match": 3.88,
+      "avg_yellow_per_match": 3.81,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.913
+    },
+    "R. Abisso": {
+      "matches": 12,
+      "yellow_cards": 48,
+      "red_cards": 2,
+      "total_cards": 50,
+      "avg_cards_per_match": 4.17,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.981
+    },
+    "G. Manganiello": {
+      "matches": 17,
+      "yellow_cards": 55,
+      "red_cards": 3,
+      "total_cards": 58,
+      "avg_cards_per_match": 3.41,
+      "avg_yellow_per_match": 3.24,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.802
+    },
+    "F. Fourneau": {
+      "matches": 11,
+      "yellow_cards": 46,
+      "red_cards": 1,
+      "total_cards": 47,
+      "avg_cards_per_match": 4.27,
+      "avg_yellow_per_match": 4.18,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 1.005
+    },
+    "D. Chiffi": {
+      "matches": 17,
+      "yellow_cards": 63,
+      "red_cards": 3,
+      "total_cards": 66,
+      "avg_cards_per_match": 3.88,
+      "avg_yellow_per_match": 3.71,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.913
+    },
+    "G. Collu": {
+      "matches": 7,
+      "yellow_cards": 28,
+      "red_cards": 0,
+      "total_cards": 28,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Serie A"
+      ],
+      "severity_factor": 0.941
+    },
+    "R. Jones": {
+      "matches": 23,
+      "yellow_cards": 104,
+      "red_cards": 4,
+      "total_cards": 108,
+      "avg_cards_per_match": 4.7,
+      "avg_yellow_per_match": 4.52,
+      "leagues": [
+        "Premier League",
+        "Champions League"
+      ],
+      "severity_factor": 1.106
+    },
+    "T. Robinson": {
+      "matches": 15,
+      "yellow_cards": 68,
+      "red_cards": 2,
+      "total_cards": 70,
+      "avg_cards_per_match": 4.67,
+      "avg_yellow_per_match": 4.53,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 1.099
+    },
+    "J. Gillett": {
+      "matches": 17,
+      "yellow_cards": 76,
+      "red_cards": 1,
+      "total_cards": 77,
+      "avg_cards_per_match": 4.53,
+      "avg_yellow_per_match": 4.47,
+      "leagues": [
+        "Premier League",
+        "Champions League"
+      ],
+      "severity_factor": 1.066
+    },
+    "S. Hooper": {
+      "matches": 24,
+      "yellow_cards": 113,
+      "red_cards": 2,
+      "total_cards": 115,
+      "avg_cards_per_match": 4.79,
+      "avg_yellow_per_match": 4.71,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 1.127
+    },
+    "C. Pawson": {
+      "matches": 23,
+      "yellow_cards": 101,
+      "red_cards": 3,
+      "total_cards": 104,
+      "avg_cards_per_match": 4.52,
+      "avg_yellow_per_match": 4.39,
+      "leagues": [
+        "Premier League",
+        "Champions League"
+      ],
+      "severity_factor": 1.064
+    },
+    "M. Oliver": {
+      "matches": 35,
+      "yellow_cards": 167,
+      "red_cards": 8,
+      "total_cards": 175,
+      "avg_cards_per_match": 5.0,
+      "avg_yellow_per_match": 4.77,
+      "leagues": [
+        "Premier League",
+        "Champions League"
+      ],
+      "severity_factor": 1.176
+    },
+    "T. Harrington": {
+      "matches": 18,
+      "yellow_cards": 74,
+      "red_cards": 3,
+      "total_cards": 77,
+      "avg_cards_per_match": 4.28,
+      "avg_yellow_per_match": 4.11,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 1.007
+    },
+    "S. Barrott": {
+      "matches": 23,
+      "yellow_cards": 108,
+      "red_cards": 1,
+      "total_cards": 109,
+      "avg_cards_per_match": 4.74,
+      "avg_yellow_per_match": 4.7,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 1.115
+    },
+    "A. Taylor": {
+      "matches": 35,
+      "yellow_cards": 116,
+      "red_cards": 6,
+      "total_cards": 122,
+      "avg_cards_per_match": 3.49,
+      "avg_yellow_per_match": 3.31,
+      "leagues": [
+        "Premier League",
+        "Champions League"
+      ],
+      "severity_factor": 0.821
+    },
+    "C. Kavanagh": {
+      "matches": 26,
+      "yellow_cards": 121,
+      "red_cards": 5,
+      "total_cards": 126,
+      "avg_cards_per_match": 4.85,
+      "avg_yellow_per_match": 4.65,
+      "leagues": [
+        "Premier League",
+        "Champions League"
+      ],
+      "severity_factor": 1.141
+    },
+    "D. Coote": {
+      "matches": 6,
+      "yellow_cards": 31,
+      "red_cards": 0,
+      "total_cards": 31,
+      "avg_cards_per_match": 5.17,
+      "avg_yellow_per_match": 5.17,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 1.216
+    },
+    "D. Bond": {
+      "matches": 14,
+      "yellow_cards": 55,
+      "red_cards": 1,
+      "total_cards": 56,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.93,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 0.941
+    },
+    "S. Attwell": {
+      "matches": 19,
+      "yellow_cards": 78,
+      "red_cards": 3,
+      "total_cards": 81,
+      "avg_cards_per_match": 4.26,
+      "avg_yellow_per_match": 4.11,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 1.002
+    },
+    "D. England": {
+      "matches": 21,
+      "yellow_cards": 88,
+      "red_cards": 5,
+      "total_cards": 93,
+      "avg_cards_per_match": 4.43,
+      "avg_yellow_per_match": 4.19,
+      "leagues": [
+        "Premier League",
+        "Champions League"
+      ],
+      "severity_factor": 1.042
+    },
+    "L. Smith": {
+      "matches": 7,
+      "yellow_cards": 28,
+      "red_cards": 1,
+      "total_cards": 29,
+      "avg_cards_per_match": 4.14,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 0.974
+    },
+    "P. Bankes": {
+      "matches": 23,
+      "yellow_cards": 90,
+      "red_cards": 3,
+      "total_cards": 93,
+      "avg_cards_per_match": 4.04,
+      "avg_yellow_per_match": 3.91,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 0.951
+    },
+    "J. Brooks": {
+      "matches": 16,
+      "yellow_cards": 85,
+      "red_cards": 1,
+      "total_cards": 86,
+      "avg_cards_per_match": 5.38,
+      "avg_yellow_per_match": 5.31,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 1.266
+    },
+    "A. Madley": {
+      "matches": 20,
+      "yellow_cards": 73,
+      "red_cards": 1,
+      "total_cards": 74,
+      "avg_cards_per_match": 3.7,
+      "avg_yellow_per_match": 3.65,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 0.871
+    },
+    "M. Salisbury": {
+      "matches": 13,
+      "yellow_cards": 39,
+      "red_cards": 3,
+      "total_cards": 42,
+      "avg_cards_per_match": 3.23,
+      "avg_yellow_per_match": 3.0,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 0.76
+    },
+    "T. Bramall": {
+      "matches": 11,
+      "yellow_cards": 38,
+      "red_cards": 4,
+      "total_cards": 42,
+      "avg_cards_per_match": 3.82,
+      "avg_yellow_per_match": 3.45,
+      "leagues": [
+        "Premier League"
+      ],
+      "severity_factor": 0.899
+    },
+    "R. Schröder": {
+      "matches": 6,
+      "yellow_cards": 23,
+      "red_cards": 1,
+      "total_cards": 24,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.83,
+      "leagues": [
+        "Bundesliga",
+        "Champions League"
+      ],
+      "severity_factor": 0.941
+    },
+    "B. Brand": {
+      "matches": 16,
+      "yellow_cards": 64,
+      "red_cards": 3,
+      "total_cards": 67,
+      "avg_cards_per_match": 4.19,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 0.986
+    },
+    "F. Zwayer": {
+      "matches": 24,
+      "yellow_cards": 108,
+      "red_cards": 4,
+      "total_cards": 112,
+      "avg_cards_per_match": 4.67,
+      "avg_yellow_per_match": 4.5,
+      "leagues": [
+        "Bundesliga",
+        "Champions League"
+      ],
+      "severity_factor": 1.099
+    },
+    "T. Stieler": {
+      "matches": 22,
+      "yellow_cards": 88,
+      "red_cards": 4,
+      "total_cards": 92,
+      "avg_cards_per_match": 4.18,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Bundesliga",
+        "Champions League"
+      ],
+      "severity_factor": 0.984
+    },
+    "T. Welz": {
+      "matches": 13,
+      "yellow_cards": 57,
+      "red_cards": 1,
+      "total_cards": 58,
+      "avg_cards_per_match": 4.46,
+      "avg_yellow_per_match": 4.38,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 1.049
+    },
+    "S. Stegemann": {
+      "matches": 18,
+      "yellow_cards": 73,
+      "red_cards": 4,
+      "total_cards": 77,
+      "avg_cards_per_match": 4.28,
+      "avg_yellow_per_match": 4.06,
+      "leagues": [
+        "Bundesliga",
+        "Champions League"
+      ],
+      "severity_factor": 1.007
+    },
+    "D. Siebert": {
+      "matches": 23,
+      "yellow_cards": 100,
+      "red_cards": 4,
+      "total_cards": 104,
+      "avg_cards_per_match": 4.52,
+      "avg_yellow_per_match": 4.35,
+      "leagues": [
+        "Bundesliga",
+        "Champions League"
+      ],
+      "severity_factor": 1.064
+    },
+    "H. Osmers": {
+      "matches": 16,
+      "yellow_cards": 62,
+      "red_cards": 2,
+      "total_cards": 64,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.88,
+      "leagues": [
+        "Bundesliga",
+        "Champions League"
+      ],
+      "severity_factor": 0.941
+    },
+    "S. Jablonski": {
+      "matches": 17,
+      "yellow_cards": 66,
+      "red_cards": 3,
+      "total_cards": 69,
+      "avg_cards_per_match": 4.06,
+      "avg_yellow_per_match": 3.88,
+      "leagues": [
+        "Bundesliga",
+        "Champions League"
+      ],
+      "severity_factor": 0.955
+    },
+    "M. Jöllenbeck": {
+      "matches": 12,
+      "yellow_cards": 52,
+      "red_cards": 3,
+      "total_cards": 55,
+      "avg_cards_per_match": 4.58,
+      "avg_yellow_per_match": 4.33,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 1.078
+    },
+    "T. Gerach": {
+      "matches": 10,
+      "yellow_cards": 40,
+      "red_cards": 2,
+      "total_cards": 42,
+      "avg_cards_per_match": 4.2,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 0.988
+    },
+    "C. Dingert": {
+      "matches": 15,
+      "yellow_cards": 55,
+      "red_cards": 2,
+      "total_cards": 57,
+      "avg_cards_per_match": 3.8,
+      "avg_yellow_per_match": 3.67,
+      "leagues": [
+        "Bundesliga",
+        "Champions League"
+      ],
+      "severity_factor": 0.894
+    },
+    "F. Badstübner": {
+      "matches": 15,
+      "yellow_cards": 47,
+      "red_cards": 3,
+      "total_cards": 50,
+      "avg_cards_per_match": 3.33,
+      "avg_yellow_per_match": 3.13,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 0.784
+    },
+    "M. Petersen": {
+      "matches": 12,
+      "yellow_cards": 55,
+      "red_cards": 5,
+      "total_cards": 60,
+      "avg_cards_per_match": 5.0,
+      "avg_yellow_per_match": 4.58,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 1.176
+    },
+    "R. Hartmann": {
+      "matches": 14,
+      "yellow_cards": 51,
+      "red_cards": 5,
+      "total_cards": 56,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.64,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 0.941
+    },
+    "B. Dankert": {
+      "matches": 15,
+      "yellow_cards": 49,
+      "red_cards": 2,
+      "total_cards": 51,
+      "avg_cards_per_match": 3.4,
+      "avg_yellow_per_match": 3.27,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 0.8
+    },
+    "S. Storks": {
+      "matches": 12,
+      "yellow_cards": 51,
+      "red_cards": 2,
+      "total_cards": 53,
+      "avg_cards_per_match": 4.42,
+      "avg_yellow_per_match": 4.25,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 1.04
+    },
+    "F. Exner": {
+      "matches": 11,
+      "yellow_cards": 55,
+      "red_cards": 5,
+      "total_cards": 60,
+      "avg_cards_per_match": 5.45,
+      "avg_yellow_per_match": 5.0,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 1.282
+    },
+    "D. Schlager": {
+      "matches": 15,
+      "yellow_cards": 53,
+      "red_cards": 3,
+      "total_cards": 56,
+      "avg_cards_per_match": 3.73,
+      "avg_yellow_per_match": 3.53,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 0.878
+    },
+    "F. Brych": {
+      "matches": 15,
+      "yellow_cards": 38,
+      "red_cards": 2,
+      "total_cards": 40,
+      "avg_cards_per_match": 2.67,
+      "avg_yellow_per_match": 2.53,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 0.628
+    },
+    "T. Reichel": {
+      "matches": 14,
+      "yellow_cards": 61,
+      "red_cards": 2,
+      "total_cards": 63,
+      "avg_cards_per_match": 4.5,
+      "avg_yellow_per_match": 4.36,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 1.059
+    },
+    "F. Willenborg": {
+      "matches": 10,
+      "yellow_cards": 44,
+      "red_cards": 0,
+      "total_cards": 44,
+      "avg_cards_per_match": 4.4,
+      "avg_yellow_per_match": 4.4,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 1.035
+    },
+    "D. Aytekin": {
+      "matches": 5,
+      "yellow_cards": 17,
+      "red_cards": 1,
+      "total_cards": 18,
+      "avg_cards_per_match": 3.6,
+      "avg_yellow_per_match": 3.4,
+      "leagues": [
+        "Bundesliga"
+      ],
+      "severity_factor": 0.847
+    },
+    "B. Bastien": {
+      "matches": 24,
+      "yellow_cards": 98,
+      "red_cards": 2,
+      "total_cards": 100,
+      "avg_cards_per_match": 4.17,
+      "avg_yellow_per_match": 4.08,
+      "leagues": [
+        "Ligue 1",
+        "Champions League"
+      ],
+      "severity_factor": 0.981
+    },
+    "M. Vernice": {
+      "matches": 15,
+      "yellow_cards": 65,
+      "red_cards": 2,
+      "total_cards": 67,
+      "avg_cards_per_match": 4.47,
+      "avg_yellow_per_match": 4.33,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 1.052
+    },
+    "J. Stinat": {
+      "matches": 18,
+      "yellow_cards": 73,
+      "red_cards": 2,
+      "total_cards": 75,
+      "avg_cards_per_match": 4.17,
+      "avg_yellow_per_match": 4.06,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.981
+    },
+    "T. Léonard": {
+      "matches": 20,
+      "yellow_cards": 70,
+      "red_cards": 2,
+      "total_cards": 72,
+      "avg_cards_per_match": 3.6,
+      "avg_yellow_per_match": 3.5,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.847
+    },
+    "C. Turpin": {
+      "matches": 26,
+      "yellow_cards": 73,
+      "red_cards": 3,
+      "total_cards": 76,
+      "avg_cards_per_match": 2.92,
+      "avg_yellow_per_match": 2.81,
+      "leagues": [
+        "Ligue 1",
+        "Champions League"
+      ],
+      "severity_factor": 0.687
+    },
+    "E. Wattellier": {
+      "matches": 18,
+      "yellow_cards": 60,
+      "red_cards": 4,
+      "total_cards": 64,
+      "avg_cards_per_match": 3.56,
+      "avg_yellow_per_match": 3.33,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.838
+    },
+    "R. Lissorgue": {
+      "matches": 14,
+      "yellow_cards": 55,
+      "red_cards": 6,
+      "total_cards": 61,
+      "avg_cards_per_match": 4.36,
+      "avg_yellow_per_match": 3.93,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 1.026
+    },
+    "W. Delajod": {
+      "matches": 19,
+      "yellow_cards": 70,
+      "red_cards": 2,
+      "total_cards": 72,
+      "avg_cards_per_match": 3.79,
+      "avg_yellow_per_match": 3.68,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.892
+    },
+    "B. Millot": {
+      "matches": 16,
+      "yellow_cards": 64,
+      "red_cards": 9,
+      "total_cards": 73,
+      "avg_cards_per_match": 4.56,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 1.073
+    },
+    "M. Bollengier": {
+      "matches": 18,
+      "yellow_cards": 61,
+      "red_cards": 6,
+      "total_cards": 67,
+      "avg_cards_per_match": 3.72,
+      "avg_yellow_per_match": 3.39,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.875
+    },
+    "G. Angoula": {
+      "matches": 8,
+      "yellow_cards": 30,
+      "red_cards": 2,
+      "total_cards": 32,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.75,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.941
+    },
+    "F. Batta": {
+      "matches": 12,
+      "yellow_cards": 46,
+      "red_cards": 2,
+      "total_cards": 48,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.83,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.941
+    },
+    "A. Kherradji": {
+      "matches": 17,
+      "yellow_cards": 62,
+      "red_cards": 3,
+      "total_cards": 65,
+      "avg_cards_per_match": 3.82,
+      "avg_yellow_per_match": 3.65,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.899
+    },
+    "B. Dechepy": {
+      "matches": 13,
+      "yellow_cards": 57,
+      "red_cards": 0,
+      "total_cards": 57,
+      "avg_cards_per_match": 4.38,
+      "avg_yellow_per_match": 4.38,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 1.031
+    },
+    "J. Pignard": {
+      "matches": 19,
+      "yellow_cards": 87,
+      "red_cards": 4,
+      "total_cards": 91,
+      "avg_cards_per_match": 4.79,
+      "avg_yellow_per_match": 4.58,
+      "leagues": [
+        "Ligue 1",
+        "Champions League"
+      ],
+      "severity_factor": 1.127
+    },
+    "S. Frappart": {
+      "matches": 17,
+      "yellow_cards": 68,
+      "red_cards": 4,
+      "total_cards": 72,
+      "avg_cards_per_match": 4.24,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Ligue 1",
+        "Champions League"
+      ],
+      "severity_factor": 0.998
+    },
+    "H. Ben El Hadj": {
+      "matches": 18,
+      "yellow_cards": 73,
+      "red_cards": 2,
+      "total_cards": 75,
+      "avg_cards_per_match": 4.17,
+      "avg_yellow_per_match": 4.06,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.981
+    },
+    "F. Letexier": {
+      "matches": 21,
+      "yellow_cards": 80,
+      "red_cards": 8,
+      "total_cards": 88,
+      "avg_cards_per_match": 4.19,
+      "avg_yellow_per_match": 3.81,
+      "leagues": [
+        "Ligue 1",
+        "Champions League"
+      ],
+      "severity_factor": 0.986
+    },
+    "J. Brisard": {
+      "matches": 18,
+      "yellow_cards": 66,
+      "red_cards": 5,
+      "total_cards": 71,
+      "avg_cards_per_match": 3.94,
+      "avg_yellow_per_match": 3.67,
+      "leagues": [
+        "Ligue 1"
+      ],
+      "severity_factor": 0.927
+    },
+    "Alejandro Muñiz": {
+      "matches": 21,
+      "yellow_cards": 80,
+      "red_cards": 6,
+      "total_cards": 86,
+      "avg_cards_per_match": 4.1,
+      "avg_yellow_per_match": 3.81,
+      "leagues": [
+        "La Liga",
+        "Champions League"
+      ],
+      "severity_factor": 0.965
+    },
+    "Miguel Ortiz": {
+      "matches": 19,
+      "yellow_cards": 74,
+      "red_cards": 5,
+      "total_cards": 79,
+      "avg_cards_per_match": 4.16,
+      "avg_yellow_per_match": 3.89,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 0.979
+    },
+    "César Soto": {
+      "matches": 21,
+      "yellow_cards": 90,
+      "red_cards": 8,
+      "total_cards": 98,
+      "avg_cards_per_match": 4.67,
+      "avg_yellow_per_match": 4.29,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 1.099
+    },
+    "Francisco Hernández": {
+      "matches": 19,
+      "yellow_cards": 90,
+      "red_cards": 2,
+      "total_cards": 92,
+      "avg_cards_per_match": 4.84,
+      "avg_yellow_per_match": 4.74,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 1.139
+    },
+    "Guillermo Cuadra": {
+      "matches": 21,
+      "yellow_cards": 91,
+      "red_cards": 3,
+      "total_cards": 94,
+      "avg_cards_per_match": 4.48,
+      "avg_yellow_per_match": 4.33,
+      "leagues": [
+        "La Liga",
+        "Champions League"
+      ],
+      "severity_factor": 1.054
+    },
+    "José Sánchez": {
+      "matches": 26,
+      "yellow_cards": 117,
+      "red_cards": 3,
+      "total_cards": 120,
+      "avg_cards_per_match": 4.62,
+      "avg_yellow_per_match": 4.5,
+      "leagues": [
+        "La Liga",
+        "Champions League"
+      ],
+      "severity_factor": 1.087
+    },
+    "Alejandro Hernández": {
+      "matches": 22,
+      "yellow_cards": 112,
+      "red_cards": 4,
+      "total_cards": 116,
+      "avg_cards_per_match": 5.27,
+      "avg_yellow_per_match": 5.09,
+      "leagues": [
+        "La Liga",
+        "Champions League"
+      ],
+      "severity_factor": 1.24
+    },
+    "Alejandro Quintero": {
+      "matches": 19,
+      "yellow_cards": 72,
+      "red_cards": 6,
+      "total_cards": 78,
+      "avg_cards_per_match": 4.11,
+      "avg_yellow_per_match": 3.79,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 0.967
+    },
+    "Juan Pulido": {
+      "matches": 15,
+      "yellow_cards": 74,
+      "red_cards": 3,
+      "total_cards": 77,
+      "avg_cards_per_match": 5.13,
+      "avg_yellow_per_match": 4.93,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 1.207
+    },
+    "Juan Martínez": {
+      "matches": 19,
+      "yellow_cards": 98,
+      "red_cards": 6,
+      "total_cards": 104,
+      "avg_cards_per_match": 5.47,
+      "avg_yellow_per_match": 5.16,
+      "leagues": [
+        "La Liga",
+        "Champions League"
+      ],
+      "severity_factor": 1.287
+    },
+    "José Munuera": {
+      "matches": 19,
+      "yellow_cards": 92,
+      "red_cards": 2,
+      "total_cards": 94,
+      "avg_cards_per_match": 4.95,
+      "avg_yellow_per_match": 4.84,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 1.165
+    },
+    "Javier Alberola": {
+      "matches": 21,
+      "yellow_cards": 65,
+      "red_cards": 6,
+      "total_cards": 71,
+      "avg_cards_per_match": 3.38,
+      "avg_yellow_per_match": 3.1,
+      "leagues": [
+        "La Liga",
+        "Champions League"
+      ],
+      "severity_factor": 0.795
+    },
+    "Víctor García": {
+      "matches": 19,
+      "yellow_cards": 90,
+      "red_cards": 2,
+      "total_cards": 92,
+      "avg_cards_per_match": 4.84,
+      "avg_yellow_per_match": 4.74,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 1.139
+    },
+    "Isidro Díaz de Mera": {
+      "matches": 18,
+      "yellow_cards": 83,
+      "red_cards": 0,
+      "total_cards": 83,
+      "avg_cards_per_match": 4.61,
+      "avg_yellow_per_match": 4.61,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 1.085
+    },
+    "Mateo Busquets": {
+      "matches": 19,
+      "yellow_cards": 107,
+      "red_cards": 7,
+      "total_cards": 114,
+      "avg_cards_per_match": 6.0,
+      "avg_yellow_per_match": 5.63,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 1.412
+    },
+    "Ricardo De Burgos": {
+      "matches": 20,
+      "yellow_cards": 70,
+      "red_cards": 4,
+      "total_cards": 74,
+      "avg_cards_per_match": 3.7,
+      "avg_yellow_per_match": 3.5,
+      "leagues": [
+        "La Liga",
+        "Champions League"
+      ],
+      "severity_factor": 0.871
+    },
+    "Gil Manzano": {
+      "matches": 24,
+      "yellow_cards": 133,
+      "red_cards": 6,
+      "total_cards": 139,
+      "avg_cards_per_match": 5.79,
+      "avg_yellow_per_match": 5.54,
+      "leagues": [
+        "La Liga",
+        "Champions League"
+      ],
+      "severity_factor": 1.362
+    },
+    "Adrián Cordero": {
+      "matches": 19,
+      "yellow_cards": 96,
+      "red_cards": 4,
+      "total_cards": 100,
+      "avg_cards_per_match": 5.26,
+      "avg_yellow_per_match": 5.05,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 1.238
+    },
+    "Pablo González": {
+      "matches": 20,
+      "yellow_cards": 73,
+      "red_cards": 2,
+      "total_cards": 75,
+      "avg_cards_per_match": 3.75,
+      "avg_yellow_per_match": 3.65,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 0.882
+    },
+    "Mario Melero": {
+      "matches": 19,
+      "yellow_cards": 68,
+      "red_cards": 2,
+      "total_cards": 70,
+      "avg_cards_per_match": 3.68,
+      "avg_yellow_per_match": 3.58,
+      "leagues": [
+        "La Liga"
+      ],
+      "severity_factor": 0.866
+    },
+    "I. Kovács": {
+      "matches": 8,
+      "yellow_cards": 28,
+      "red_cards": 2,
+      "total_cards": 30,
+      "avg_cards_per_match": 3.75,
+      "avg_yellow_per_match": 3.5,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.882
+    },
+    "I. Peljto": {
+      "matches": 8,
+      "yellow_cards": 24,
+      "red_cards": 2,
+      "total_cards": 26,
+      "avg_cards_per_match": 3.25,
+      "avg_yellow_per_match": 3.0,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.765
+    },
+    "E. Eskås": {
+      "matches": 8,
+      "yellow_cards": 30,
+      "red_cards": 2,
+      "total_cards": 32,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.75,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.941
+    },
+    "G. Nyberg": {
+      "matches": 6,
+      "yellow_cards": 17,
+      "red_cards": 0,
+      "total_cards": 17,
+      "avg_cards_per_match": 2.83,
+      "avg_yellow_per_match": 2.83,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.666
+    },
+    "S. Marciniak": {
+      "matches": 6,
+      "yellow_cards": 19,
+      "red_cards": 2,
+      "total_cards": 21,
+      "avg_cards_per_match": 3.5,
+      "avg_yellow_per_match": 3.17,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.824
+    },
+    "S. Schärer": {
+      "matches": 6,
+      "yellow_cards": 24,
+      "red_cards": 0,
+      "total_cards": 24,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.941
+    },
+    "H. Meler": {
+      "matches": 6,
+      "yellow_cards": 24,
+      "red_cards": 0,
+      "total_cards": 24,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 4.0,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.941
+    },
+    "S. Vinčić": {
+      "matches": 10,
+      "yellow_cards": 41,
+      "red_cards": 0,
+      "total_cards": 41,
+      "avg_cards_per_match": 4.1,
+      "avg_yellow_per_match": 4.1,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.965
+    },
+    "D. Makkelie": {
+      "matches": 5,
+      "yellow_cards": 18,
+      "red_cards": 2,
+      "total_cards": 20,
+      "avg_cards_per_match": 4.0,
+      "avg_yellow_per_match": 3.6,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.941
+    },
+    "João Pedro Pinheiro": {
+      "matches": 5,
+      "yellow_cards": 15,
+      "red_cards": 0,
+      "total_cards": 15,
+      "avg_cards_per_match": 3.0,
+      "avg_yellow_per_match": 3.0,
+      "leagues": [
+        "Champions League"
+      ],
+      "severity_factor": 0.706
+    }
+  },
+  "total_referees": 119
+}

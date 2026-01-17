@@ -882,8 +882,8 @@ col_ref1, col_ref2 = st.columns([2, 1])
 with col_ref1:
     referee_name = st.text_input(
         "Nome arbitro",
-        placeholder="Es: Daniele Orsato, Marco Guida...",
-        help="Inserisci il nome dell'arbitro per calcolare le probabilità cartellini in base alla sua severità storica",
+        placeholder="Es: Orsato, Guida, Mariani...",
+        help="Inserisci anche solo il cognome! Es: 'Feliciani' trova 'Luca Feliciani'",
         key="referee_input"
     )
 with col_ref2:
@@ -894,16 +894,17 @@ with col_ref2:
             ref_info = get_referee_adjustment(referee_name, selected_league_name)
             if ref_info.get("found"):
                 severity = ref_info.get("severity_factor", 1.0)
+                ref_full_name = ref_info.get("name", referee_name)
                 if severity > 1.1:
-                    st.warning(f"🔴 Severo ({severity:.2f}x)")
+                    st.warning(f"🔴 {ref_full_name} ({severity:.2f}x)")
                 elif severity < 0.9:
-                    st.success(f"🟢 Permissivo ({severity:.2f}x)")
+                    st.success(f"🟢 {ref_full_name} ({severity:.2f}x)")
                 else:
-                    st.info(f"🟡 Medio ({severity:.2f}x)")
+                    st.info(f"🟡 {ref_full_name} ({severity:.2f}x)")
             else:
-                st.caption("Arbitro non nel database")
-        except:
-            pass
+                st.caption("❌ Non trovato nel database")
+        except Exception as e:
+            st.caption(f"⚠️ Errore: {e}")
 
 # Pulsante calcola
 col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])

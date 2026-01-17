@@ -424,7 +424,7 @@ def get_referee_adjustment(referee_name: str, league_name: str = None) -> Dict:
     Ottiene i fattori di aggiustamento per un arbitro specifico.
     
     Args:
-        referee_name: Nome arbitro (può includere nazionalità)
+        referee_name: Nome arbitro (può includere nazionalità, parziale ok)
         league_name: Nome della lega (opzionale, per media specifica)
     
     Returns:
@@ -441,13 +441,51 @@ def get_referee_adjustment(referee_name: str, league_name: str = None) -> Dict:
             "message": "Database arbitri non trovato"
         }
     
-    # Pulisci nome arbitro
-    ref_clean = referee_name.split(",")[0].strip() if referee_name else ""
+    # Pulisci nome arbitro (rimuovi nazionalità se presente)
+    ref_search = referee_name.split(",")[0].strip().lower() if referee_name else ""
+    
+    if not ref_search:
+        return {
+            "found": False,
+            "severity_factor": 1.0,
+            "avg_cards": None,
+            "matches": 0,
+            "message": "Nome arbitro vuoto"
+        }
     
     referees = database.get("referees", {})
     
-    if ref_clean in referees:
-        ref_data = referees[ref_clean]
+    # RICERCA MIGLIORATA:
+    # 1. Prima prova match esatto (case-insensitive)
+    # 2. Poi prova match parziale (cognome)
+    
+    ref_found = None
+    ref_name_found = None
+    
+    for name, data in referees.items():
+        name_lower = name.lower()
+        
+        # Match esatto
+        if name_lower == ref_search:
+            ref_found = data
+            ref_name_found = name
+            break
+        
+        # Match parziale: cerca se il termine è contenuto nel nome
+        # Es: "feliciani" trova "Luca Feliciani"
+        if ref_search in name_lower:
+            ref_found = data
+            ref_name_found = name
+            # Non fare break, continua a cercare un match migliore
+        
+        # Match parziale inverso: il nome del DB è contenuto nella ricerca
+        # Es: cerca "Marco Guida Italy" trova "Marco Guida"
+        if name_lower in ref_search:
+            ref_found = data
+            ref_name_found = name
+    
+    if ref_found:
+        ref_data = ref_found
         
         # Usa media della lega specifica se disponibile
         league_avg = database.get("global_average_cards", 4.0)
@@ -459,12 +497,13 @@ def get_referee_adjustment(referee_name: str, league_name: str = None) -> Dict:
         
         return {
             "found": True,
+            "name": ref_name_found,  # Nome completo come nel database
             "severity_factor": round(severity, 3),
             "avg_cards": ref_data["avg_cards_per_match"],
             "avg_yellow": ref_data["avg_yellow_per_match"],
             "matches": ref_data["matches"],
             "leagues": ref_data["leagues"],
-            "message": f"Arbitro trovato: {ref_data['matches']} partite analizzate"
+            "message": f"Arbitro '{ref_name_found}' trovato: {ref_data['matches']} partite analizzate"
         }
     else:
         return {
@@ -472,7 +511,7 @@ def get_referee_adjustment(referee_name: str, league_name: str = None) -> Dict:
             "severity_factor": 1.0,
             "avg_cards": None,
             "matches": 0,
-            "message": f"Arbitro '{ref_clean}' non trovato nel database"
+            "message": f"Arbitro '{ref_search}' non trovato nel database"
         }
 
 
