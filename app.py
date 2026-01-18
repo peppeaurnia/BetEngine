@@ -1344,22 +1344,32 @@ if calculate_btn:
         home_logo_path = get_logo_path(home_team_name)
         away_logo_path = get_logo_path(away_team_name)
         
-        # Layout semplice con colonne Streamlit
+        # Layout: [Logo + Nome Casa] VS [Nome + Logo Trasferta]
         st.markdown("---")
-        col_home, col_vs, col_away = st.columns([2, 1, 2])
+        col_home, col_vs, col_away = st.columns([3, 1, 3])
         
         with col_home:
-            if home_logo_path:
-                st.image(home_logo_path, width=60)
-            st.markdown(f"**{home_team_name}**")
+            subcol1, subcol2 = st.columns([1, 2])
+            with subcol1:
+                if home_logo_path:
+                    st.image(home_logo_path, width=55)
+                else:
+                    st.markdown("🏠")
+            with subcol2:
+                st.markdown(f"<p style='font-size:1.3rem; font-weight:700; color:#ffffff; margin-top:15px;'>{home_team_name}</p>", unsafe_allow_html=True)
         
         with col_vs:
-            st.markdown("<h2 style='text-align:center; color:#f39c12;'>VS</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align:center; color:#f39c12; margin-top:10px;'>VS</h2>", unsafe_allow_html=True)
         
         with col_away:
-            if away_logo_path:
-                st.image(away_logo_path, width=60)
-            st.markdown(f"**{away_team_name}**")
+            subcol1, subcol2 = st.columns([2, 1])
+            with subcol1:
+                st.markdown(f"<p style='font-size:1.3rem; font-weight:700; color:#ffffff; margin-top:15px; text-align:right;'>{away_team_name}</p>", unsafe_allow_html=True)
+            with subcol2:
+                if away_logo_path:
+                    st.image(away_logo_path, width=55)
+                else:
+                    st.markdown("✈️")
         
         st.markdown("---")
                 
