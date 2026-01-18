@@ -20,6 +20,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
+import base64
 
 # Import moduli locali
 from probability_engine import (
@@ -47,6 +48,17 @@ from auth import (
     show_user_info_sidebar
 )
 from database import init_database
+
+
+def get_logo_base64_simple(logo_path):
+    """Converte un file immagine in base64 string."""
+    if not logo_path:
+        return None
+    try:
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode('utf-8')
+    except:
+        return None
 
 # ============================================================
 # CONFIGURAZIONE PAGINA
@@ -1339,37 +1351,33 @@ if calculate_btn:
     quality = assess_prediction_quality(home_stats, away_stats)
     
     # === SEZIONE RISULTATI ===
-    # Header con loghi squadre - usando componenti Streamlit nativi
+    # Header con loghi squadre - layout fisso su una riga
     try:
         home_logo_path = get_logo_path(home_team_name)
         away_logo_path = get_logo_path(away_team_name)
         
-        # Layout: [Logo + Nome Casa] VS [Nome + Logo Trasferta]
         st.markdown("---")
-        col_home, col_vs, col_away = st.columns([3, 1, 3])
         
-        with col_home:
-            subcol1, subcol2 = st.columns([1, 2])
-            with subcol1:
-                if home_logo_path:
-                    st.image(home_logo_path, width=55)
-                else:
-                    st.markdown("🏠")
-            with subcol2:
-                st.markdown(f"<p style='font-size:1.3rem; font-weight:700; color:#ffffff; margin-top:15px;'>{home_team_name}</p>", unsafe_allow_html=True)
+        # Prepara HTML loghi con fallback
+        home_b64 = get_logo_base64_simple(home_logo_path) if home_logo_path else None
+        away_b64 = get_logo_base64_simple(away_logo_path) if away_logo_path else None
         
-        with col_vs:
-            st.markdown("<h2 style='text-align:center; color:#f39c12; margin-top:10px;'>VS</h2>", unsafe_allow_html=True)
+        home_logo_html = f'<img src="data:image/png;base64,{home_b64}" style="width:40px; height:40px; object-fit:contain;">' if home_b64 else '<span style="font-size:1.5rem;">🏠</span>'
+        away_logo_html = f'<img src="data:image/png;base64,{away_b64}" style="width:40px; height:40px; object-fit:contain;">' if away_b64 else '<span style="font-size:1.5rem;">✈️</span>'
         
-        with col_away:
-            subcol1, subcol2 = st.columns([2, 1])
-            with subcol1:
-                st.markdown(f"<p style='font-size:1.3rem; font-weight:700; color:#ffffff; margin-top:15px; text-align:right;'>{away_team_name}</p>", unsafe_allow_html=True)
-            with subcol2:
-                if away_logo_path:
-                    st.image(away_logo_path, width=55)
-                else:
-                    st.markdown("✈️")
+        st.markdown(f"""
+        <div style="display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:nowrap; padding:10px 0;">
+            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                {home_logo_html}
+                <span style="font-size:clamp(0.9rem, 3vw, 1.3rem); font-weight:700; color:#ffffff; white-space:nowrap;">{home_team_name}</span>
+            </div>
+            <span style="font-size:clamp(1rem, 3vw, 1.5rem); font-weight:700; color:#f39c12; margin:0 10px;">VS</span>
+            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                <span style="font-size:clamp(0.9rem, 3vw, 1.3rem); font-weight:700; color:#ffffff; white-space:nowrap;">{away_team_name}</span>
+                {away_logo_html}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
         st.markdown("---")
                 
