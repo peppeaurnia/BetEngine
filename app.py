@@ -66,9 +66,16 @@ except Exception as e:
 
 # CSS personalizzato
 st.markdown("""
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
     /* Import font Audiowide */
     @import url('https://fonts.googleapis.com/css2?family=Audiowide&display=swap');
+    
+    /* Fix viewport per mobile */
+    html, body, [data-testid="stAppViewContainer"] {
+        width: 100% !important;
+        overflow-x: hidden !important;
+    }
     
     /* Sfondo generale blu scuro */
     .stApp {
@@ -264,9 +271,36 @@ st.markdown("""
         color: #1a1a2e !important;
     }
     
-    /* Caption e help text */
-    .stCaption, small {
-        color: #5a6c7d !important;
+    /* Caption e help text - più chiaro per leggibilità */
+    .stCaption, small, .stCaption p {
+        color: #a0b4c4 !important;
+    }
+    
+    /* Fix contrasto per qualsiasi testo su sfondo blu scuro */
+    .stApp p, .stApp span, .stApp div {
+        color: #e8f4fc;
+    }
+    
+    /* Testo bianco garantito su sfondi scuri */
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] span,
+    [data-testid="stMarkdownContainer"] strong,
+    [data-testid="stMarkdownContainer"] em {
+        color: #ffffff !important;
+    }
+    
+    /* Eccezione: testo scuro negli elementi con sfondo chiaro */
+    .stAlert p, .stAlert span, .stAlert div,
+    [data-testid="stExpander"] p,
+    [data-testid="stExpander"] span,
+    [data-testid="stExpander"] div,
+    table td, table th {
+        color: #1a1a2e !important;
+    }
+    
+    /* Header tabella - sempre bianco */
+    table th {
+        color: #ffffff !important;
     }
     
     /* Stile generale */
@@ -383,6 +417,261 @@ st.markdown("""
     .team-stats-card small,
     .team-stats-card div {
         color: #000000 !important;
+    }
+    
+    /* ============================================================
+       RESPONSIVE - MOBILE STYLES
+       ============================================================ */
+    
+    /* Tablet e Mobile (< 992px) */
+    @media screen and (max-width: 992px) {
+        /* Riduci padding generale */
+        .main .block-container {
+            padding: 1rem 0.5rem !important;
+            max-width: 100% !important;
+        }
+        
+        /* Font più piccoli */
+        h1 { font-size: 1.5rem !important; }
+        h2 { font-size: 1.3rem !important; }
+        h3 { font-size: 1.1rem !important; }
+        
+        /* Colonne Streamlit - forza stack verticale */
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+        }
+        
+        /* Container colonne - direzione verticale */
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 0.5rem !important;
+        }
+    }
+    
+    /* Mobile (< 768px) */
+    @media screen and (max-width: 768px) {
+        /* Header partita - più compatto */
+        .match-header-container {
+            flex-direction: column !important;
+            padding: 10px !important;
+        }
+        
+        /* Sidebar chiusa di default su mobile */
+        section[data-testid="stSidebar"] {
+            width: 100% !important;
+            min-width: 100% !important;
+        }
+        
+        /* Font ancora più piccoli */
+        h1 { font-size: 1.3rem !important; }
+        h2 { font-size: 1.15rem !important; }
+        h3 { font-size: 1rem !important; }
+        p, span, div { font-size: 0.9rem !important; }
+        
+        /* Metriche Streamlit più compatte */
+        [data-testid="stMetricValue"] {
+            font-size: 1.3rem !important;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: 0.75rem !important;
+        }
+        [data-testid="stMetricDelta"] {
+            font-size: 0.7rem !important;
+        }
+        
+        /* Padding ridotto nelle card */
+        [data-testid="stMetric"] {
+            padding: 0.5rem !important;
+        }
+        
+        /* Tabelle scrollabili orizzontalmente */
+        table {
+            display: block !important;
+            overflow-x: auto !important;
+            white-space: nowrap !important;
+            -webkit-overflow-scrolling: touch !important;
+            font-size: 0.8rem !important;
+        }
+        
+        th, td {
+            padding: 6px 8px !important;
+            font-size: 0.75rem !important;
+        }
+        
+        /* Grafici Plotly - dimensioni adattive */
+        .js-plotly-plot, .plotly {
+            width: 100% !important;
+            max-width: 100% !important;
+        }
+        
+        /* Card 1X2 più compatte */
+        .stMarkdown div[style*="border-radius:15px"] {
+            padding: 12px !important;
+        }
+        
+        .stMarkdown div[style*="font-size:2.5rem"] {
+            font-size: 1.8rem !important;
+        }
+        
+        /* Bottoni full width su mobile */
+        .stButton button {
+            width: 100% !important;
+            padding: 0.6rem !important;
+            font-size: 0.9rem !important;
+        }
+        
+        /* Input fields più compatti */
+        .stTextInput input,
+        .stSelectbox select,
+        .stNumberInput input {
+            font-size: 16px !important; /* Previene zoom su iOS */
+            padding: 0.5rem !important;
+        }
+        
+        /* Expander più compatto */
+        .streamlit-expanderHeader {
+            font-size: 0.9rem !important;
+            padding: 0.5rem !important;
+        }
+        
+        /* Immagini loghi ridimensionate */
+        img {
+            max-width: 45px !important;
+            height: auto !important;
+        }
+    }
+    
+    /* Mobile piccolo (< 480px) */
+    @media screen and (max-width: 480px) {
+        /* Padding minimo */
+        .main .block-container {
+            padding: 0.5rem 0.3rem !important;
+        }
+        
+        /* Font minimi leggibili */
+        h1 { font-size: 1.2rem !important; }
+        h2 { font-size: 1rem !important; }
+        h3 { font-size: 0.9rem !important; }
+        p, span { font-size: 0.85rem !important; }
+        
+        /* Metriche ancora più compatte */
+        [data-testid="stMetricValue"] {
+            font-size: 1.1rem !important;
+        }
+        
+        /* Nascondi testo meno importante */
+        .stCaption {
+            font-size: 0.7rem !important;
+        }
+        
+        /* Tabelle font minimo */
+        th, td {
+            padding: 4px 6px !important;
+            font-size: 0.7rem !important;
+        }
+        
+        /* VS badge più piccolo */
+        .vs-badge {
+            padding: 5px 10px !important;
+            font-size: 0.9rem !important;
+        }
+        
+        /* Loghi più piccoli */
+        img {
+            max-width: 35px !important;
+        }
+    }
+    
+    /* Fix per iOS Safari - previeni zoom su input */
+    @supports (-webkit-touch-callout: none) {
+        input, select, textarea {
+            font-size: 16px !important;
+        }
+    }
+    
+    /* Scrollbar più sottile su mobile */
+    @media screen and (max-width: 768px) {
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 2px;
+        }
+    }
+    
+    /* ============================================================
+       FIX CONTRASTO GLOBALI
+       ============================================================ */
+    
+    /* Testo principale su sfondo scuro - sempre chiaro */
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {
+        color: #ffffff !important;
+    }
+    
+    /* Markdown container - testo bianco di default */
+    .main [data-testid="stMarkdownContainer"] {
+        color: #e8f4fc !important;
+    }
+    
+    /* Fix specifico: card con sfondo chiaro -> testo scuro */
+    div[style*="background:#f"], 
+    div[style*="background: #f"],
+    div[style*="background:white"],
+    div[style*="background: white"],
+    div[style*="background:#fff"],
+    div[style*="background: #fff"] {
+        color: #1a1a2e !important;
+    }
+    
+    /* Fix specifico: card con sfondo colorato -> testo bianco */
+    div[style*="background:linear-gradient"],
+    div[style*="background: linear-gradient"],
+    div[style*="background:#3498db"],
+    div[style*="background:#27ae60"],
+    div[style*="background:#e74c3c"],
+    div[style*="background:#9b59b6"],
+    div[style*="background:#34495e"],
+    div[style*="background:#1a1a2e"],
+    div[style*="background:#f39c12"] {
+        color: #ffffff !important;
+    }
+    
+    /* Metriche delta - verde/rosso leggibile */
+    [data-testid="stMetricDelta"] svg {
+        stroke: currentColor !important;
+    }
+    [data-testid="stMetricDelta"][data-testid*="Up"] {
+        color: #00c853 !important;
+    }
+    [data-testid="stMetricDelta"][data-testid*="Down"] {
+        color: #ff5252 !important;
+    }
+    
+    /* Info/Warning/Success/Error boxes - testo scuro */
+    [data-testid="stAlert"] p,
+    [data-testid="stAlert"] span {
+        color: #1a1a2e !important;
+    }
+    
+    /* Tooltip e popover - testo leggibile */
+    [data-baseweb="tooltip"] {
+        background: #ffffff !important;
+        color: #1a1a2e !important;
+    }
+    
+    /* Caption sotto i loghi - testo chiaro */
+    .stImage figcaption,
+    [data-testid="stImage"] figcaption {
+        color: #a8d4f0 !important;
+    }
+    
+    /* Write/text normale */
+    .stApp .stMarkdown div:not([style]) {
+        color: #e8f4fc !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -953,52 +1242,62 @@ if calculate_btn:
     quality = assess_prediction_quality(home_stats, away_stats)
     
     # === SEZIONE RISULTATI ===
-    # Header con loghi squadre usando st.image nativo
+    # Header con loghi squadre - versione responsive
     try:
         home_logo_path = get_logo_path(home_team_name)
         away_logo_path = get_logo_path(away_team_name)
         
-        # Layout: [Logo] Nome Casa    VS    Nome Trasferta [Logo]
-        col_h_logo, col_h_name, col_vs, col_a_name, col_a_logo = st.columns([1, 3, 1, 3, 1])
+        # Creo HTML responsive per l'header
+        st.markdown(f"""
+        <div class="match-header-responsive" style="
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            padding: 15px; 
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%);
+            border-radius: 15px; 
+            margin: 10px 0;
+            flex-wrap: wrap;
+            gap: 10px;">
+            
+            <!-- Squadra Casa -->
+            <div style="display: flex; align-items: center; flex: 1; justify-content: flex-end; min-width: 120px;">
+                <span style="font-size: clamp(1rem, 4vw, 1.4rem); font-weight: 700; color: #ffffff; text-align: right;">
+                    {home_team_name}
+                </span>
+            </div>
+            
+            <!-- VS -->
+            <div style="padding: 8px 16px; background: rgba(243, 156, 18, 0.9); border-radius: 8px; margin: 0 10px;">
+                <span style="font-size: clamp(0.9rem, 3vw, 1.1rem); font-weight: 700; color: white;">VS</span>
+            </div>
+            
+            <!-- Squadra Trasferta -->
+            <div style="display: flex; align-items: center; flex: 1; justify-content: flex-start; min-width: 120px;">
+                <span style="font-size: clamp(1rem, 4vw, 1.4rem); font-weight: 700; color: #ffffff; text-align: left;">
+                    {away_team_name}
+                </span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
-        with col_h_logo:
+        # Mostra loghi sotto su una riga separata (più mobile-friendly)
+        col_logo1, col_logo2 = st.columns(2)
+        with col_logo1:
             if home_logo_path:
-                st.image(home_logo_path, width=55)
-            else:
-                st.markdown("<div style='font-size:40px; text-align:center;'>🏠</div>", unsafe_allow_html=True)
-        
-        with col_h_name:
-            st.markdown(f"""
-            <div style="display:flex; align-items:center; height:55px; justify-content:flex-start;">
-                <span style="font-size:1.4em; font-weight:700;">{home_team_name}</span>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col_vs:
-            st.markdown("""
-            <div style="display:flex; align-items:center; justify-content:center; height:55px;">
-                <span style="background:#f39c12; color:white; padding:8px 16px; border-radius:8px; 
-                             font-size:1.1em; font-weight:700;">VS</span>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col_a_name:
-            st.markdown(f"""
-            <div style="display:flex; align-items:center; height:55px; justify-content:flex-end;">
-                <span style="font-size:1.4em; font-weight:700;">{away_team_name}</span>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col_a_logo:
+                st.image(home_logo_path, width=50, caption=home_team_name)
+        with col_logo2:
             if away_logo_path:
-                st.image(away_logo_path, width=55)
-            else:
-                st.markdown("<div style='font-size:40px; text-align:center;'>✈️</div>", unsafe_allow_html=True)
+                st.image(away_logo_path, width=50, caption=away_team_name)
                 
     except Exception as e:
         # Fallback semplice
         st.markdown(f"""
-        <h2 style="text-align:center;">🏠 {home_team_name} &nbsp; VS &nbsp; {away_team_name} ✈️</h2>
+        <div style="text-align:center; padding: 15px; background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 15px;">
+            <span style="font-size: clamp(1rem, 4vw, 1.5rem); font-weight: 700; color: white;">
+                🏠 {home_team_name} &nbsp; VS &nbsp; {away_team_name} ✈️
+            </span>
+        </div>
         """, unsafe_allow_html=True)
     
     # Indicatore qualità
@@ -1035,10 +1334,10 @@ if calculate_btn:
         p_home = probabilities['p_home'] * 100
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #3498db, #2980b9); color:white; 
-                    padding:20px; border-radius:15px; text-align:center;">
-            <div style="font-size:0.9rem;">🏠 {home_team_name}</div>
-            <div style="font-size:2.5rem; font-weight:bold;">{p_home:.1f}%</div>
-            <div style="font-size:0.8rem; opacity:0.8;">Quota implicita: {100/p_home:.2f}</div>
+                    padding: clamp(10px, 3vw, 20px); border-radius:15px; text-align:center; min-height: 100px;">
+            <div style="font-size: clamp(0.7rem, 2.5vw, 0.9rem);">🏠 {home_team_name}</div>
+            <div style="font-size: clamp(1.5rem, 6vw, 2.5rem); font-weight:bold;">{p_home:.1f}%</div>
+            <div style="font-size: clamp(0.6rem, 2vw, 0.8rem); opacity:0.8;">Quota: {100/p_home:.2f}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1046,10 +1345,10 @@ if calculate_btn:
         p_draw = probabilities['p_draw'] * 100
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #95a5a6, #7f8c8d); color:white; 
-                    padding:20px; border-radius:15px; text-align:center;">
-            <div style="font-size:0.9rem;">🤝 Pareggio</div>
-            <div style="font-size:2.5rem; font-weight:bold;">{p_draw:.1f}%</div>
-            <div style="font-size:0.8rem; opacity:0.8;">Quota implicita: {100/p_draw:.2f}</div>
+                    padding: clamp(10px, 3vw, 20px); border-radius:15px; text-align:center; min-height: 100px;">
+            <div style="font-size: clamp(0.7rem, 2.5vw, 0.9rem);">🤝 Pareggio</div>
+            <div style="font-size: clamp(1.5rem, 6vw, 2.5rem); font-weight:bold;">{p_draw:.1f}%</div>
+            <div style="font-size: clamp(0.6rem, 2vw, 0.8rem); opacity:0.8;">Quota: {100/p_draw:.2f}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1057,10 +1356,10 @@ if calculate_btn:
         p_away = probabilities['p_away'] * 100
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #e74c3c, #c0392b); color:white; 
-                    padding:20px; border-radius:15px; text-align:center;">
-            <div style="font-size:0.9rem;">✈️ {away_team_name}</div>
-            <div style="font-size:2.5rem; font-weight:bold;">{p_away:.1f}%</div>
-            <div style="font-size:0.8rem; opacity:0.8;">Quota implicita: {100/p_away:.2f}</div>
+                    padding: clamp(10px, 3vw, 20px); border-radius:15px; text-align:center; min-height: 100px;">
+            <div style="font-size: clamp(0.7rem, 2.5vw, 0.9rem);">✈️ {away_team_name}</div>
+            <div style="font-size: clamp(1.5rem, 6vw, 2.5rem); font-weight:bold;">{p_away:.1f}%</div>
+            <div style="font-size: clamp(0.6rem, 2vw, 0.8rem); opacity:0.8;">Quota: {100/p_away:.2f}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1208,19 +1507,19 @@ if calculate_btn:
                     border-left: 4px solid {ref_color}; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                 <div>
-                    <strong style="font-size: 1.1em;">{ref_emoji} Arbitro: {ref_name}</strong>
+                    <strong style="font-size: 1.1em; color: #ffffff;">{ref_emoji} Arbitro: {ref_name}</strong>
                     <span style="background: {ref_color}; color: white; padding: 2px 8px; border-radius: 12px; 
                                  font-size: 0.75em; margin-left: 10px;">{ref_label}</span>
                 </div>
                 <div style="text-align: right;">
-                    <span style="font-size: 0.9em;">
+                    <span style="font-size: 0.9em; color: #e0e0e0;">
                         📊 {ref_avg:.1f} cart/partita | 
                         ⚖️ Fattore: {severity:.2f}x | 
                         🎮 {ref_matches} partite analizzate
                     </span>
                 </div>
             </div>
-            <div style="font-size: 0.85em; margin-top: 8px; opacity: 0.9;">
+            <div style="font-size: 0.85em; margin-top: 8px; color: #c0c0c0;">
                 <em>Le probabilità cartellini sono state aggiustate del {((adj-1)*100):+.0f}% rispetto alla media</em>
             </div>
         </div>
