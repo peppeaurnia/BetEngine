@@ -55,7 +55,7 @@ st.set_page_config(
     page_title="BetEngine",
     page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Inizializza database (dopo che Streamlit è pronto)
@@ -85,6 +85,25 @@ st.markdown("""
     /* Sidebar ancora più scura */
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg, #0d1b2a 0%, #051221 100%);
+    }
+    
+    /* Sidebar - gestione chiusura su mobile/tablet */
+    section[data-testid="stSidebar"][aria-expanded="false"] {
+        display: none !important;
+        width: 0 !important;
+        min-width: 0 !important;
+        transform: translateX(-100%) !important;
+    }
+    
+    /* Fix sidebar collapsed - nascondere completamente */
+    [data-testid="stSidebar"][aria-expanded="false"] > div {
+        display: none !important;
+    }
+    
+    /* Sidebar aperta - larghezza fissa */
+    section[data-testid="stSidebar"][aria-expanded="true"] {
+        min-width: 280px;
+        max-width: 320px;
     }
     
     /* Rimuovi qualsiasi sfondo bianco dai markdown nella sidebar */
@@ -448,6 +467,19 @@ st.markdown("""
             flex-wrap: wrap !important;
             gap: 0.5rem !important;
         }
+        
+        /* Sidebar su tablet - comportamento migliorato */
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }
+        
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            min-width: 260px !important;
+            max-width: 300px !important;
+        }
     }
     
     /* Mobile (< 768px) */
@@ -458,10 +490,37 @@ st.markdown("""
             padding: 10px !important;
         }
         
-        /* Sidebar chiusa di default su mobile */
+        /* Sidebar su mobile - overlay invece di push */
         section[data-testid="stSidebar"] {
+            position: fixed !important;
+            z-index: 999999 !important;
+            height: 100vh !important;
+            top: 0 !important;
+            left: 0 !important;
+        }
+        
+        /* Sidebar chiusa su mobile - nascosta completamente */
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            transform: translateX(-100%) !important;
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            visibility: hidden !important;
+        }
+        
+        /* Sidebar aperta su mobile - full width */
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            width: 85vw !important;
+            max-width: 320px !important;
+            transform: translateX(0) !important;
+            visibility: visible !important;
+        }
+        
+        /* Main content quando sidebar è aperta */
+        .main .block-container {
             width: 100% !important;
-            min-width: 100% !important;
+            max-width: 100% !important;
         }
         
         /* Font ancora più piccoli */
@@ -1260,19 +1319,16 @@ if calculate_btn:
             flex-wrap: wrap;
             gap: 10px;">
             
-            <!-- Squadra Casa -->
             <div style="display: flex; align-items: center; flex: 1; justify-content: flex-end; min-width: 120px;">
                 <span style="font-size: clamp(1rem, 4vw, 1.4rem); font-weight: 700; color: #ffffff; text-align: right;">
                     {home_team_name}
                 </span>
             </div>
             
-            <!-- VS -->
             <div style="padding: 8px 16px; background: rgba(243, 156, 18, 0.9); border-radius: 8px; margin: 0 10px;">
                 <span style="font-size: clamp(0.9rem, 3vw, 1.1rem); font-weight: 700; color: white;">VS</span>
             </div>
             
-            <!-- Squadra Trasferta -->
             <div style="display: flex; align-items: center; flex: 1; justify-content: flex-start; min-width: 120px;">
                 <span style="font-size: clamp(1rem, 4vw, 1.4rem); font-weight: 700; color: #ffffff; text-align: left;">
                     {away_team_name}
