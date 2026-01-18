@@ -1339,60 +1339,33 @@ if calculate_btn:
     quality = assess_prediction_quality(home_stats, away_stats)
     
     # === SEZIONE RISULTATI ===
-    # Header con loghi squadre - versione responsive
+    # Header con loghi squadre - usando componenti Streamlit nativi
     try:
         home_logo_path = get_logo_path(home_team_name)
         away_logo_path = get_logo_path(away_team_name)
         
-        # Creo HTML responsive per l'header
-        st.markdown(f"""
-        <div class="match-header-responsive" style="
-            display: flex; 
-            align-items: center; 
-            justify-content: center; 
-            padding: 15px; 
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%);
-            border-radius: 15px; 
-            margin: 10px 0;
-            flex-wrap: wrap;
-            gap: 10px;">
-            
-            <div style="display: flex; align-items: center; flex: 1; justify-content: flex-end; min-width: 120px;">
-                <span style="font-size: clamp(1rem, 4vw, 1.4rem); font-weight: 700; color: #ffffff; text-align: right;">
-                    {home_team_name}
-                </span>
-            </div>
-            
-            <div style="padding: 8px 16px; background: rgba(243, 156, 18, 0.9); border-radius: 8px; margin: 0 10px;">
-                <span style="font-size: clamp(0.9rem, 3vw, 1.1rem); font-weight: 700; color: white;">VS</span>
-            </div>
-            
-            <div style="display: flex; align-items: center; flex: 1; justify-content: flex-start; min-width: 120px;">
-                <span style="font-size: clamp(1rem, 4vw, 1.4rem); font-weight: 700; color: #ffffff; text-align: left;">
-                    {away_team_name}
-                </span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Layout semplice con colonne Streamlit
+        st.markdown("---")
+        col_home, col_vs, col_away = st.columns([2, 1, 2])
         
-        # Mostra loghi sotto su una riga separata (più mobile-friendly)
-        col_logo1, col_logo2 = st.columns(2)
-        with col_logo1:
+        with col_home:
             if home_logo_path:
-                st.image(home_logo_path, width=50, caption=home_team_name)
-        with col_logo2:
+                st.image(home_logo_path, width=60)
+            st.markdown(f"**{home_team_name}**")
+        
+        with col_vs:
+            st.markdown("<h2 style='text-align:center; color:#f39c12;'>VS</h2>", unsafe_allow_html=True)
+        
+        with col_away:
             if away_logo_path:
-                st.image(away_logo_path, width=50, caption=away_team_name)
+                st.image(away_logo_path, width=60)
+            st.markdown(f"**{away_team_name}**")
+        
+        st.markdown("---")
                 
     except Exception as e:
         # Fallback semplice
-        st.markdown(f"""
-        <div style="text-align:center; padding: 15px; background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 15px;">
-            <span style="font-size: clamp(1rem, 4vw, 1.5rem); font-weight: 700; color: white;">
-                🏠 {home_team_name} &nbsp; VS &nbsp; {away_team_name} ✈️
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.subheader(f"🏠 {home_team_name}  VS  {away_team_name} ✈️")
     
     # Indicatore qualità
     st.markdown(f"""
