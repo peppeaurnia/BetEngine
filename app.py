@@ -454,6 +454,14 @@ st.markdown("""
         color: #7fb3d3 !important;
     }
     
+    /* Match header - default: desktop visibile, mobile nascosto */
+    .match-header-desktop {
+        display: flex !important;
+    }
+    .match-header-mobile {
+        display: none !important;
+    }
+    
     /* Nascondi elementi Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -523,6 +531,14 @@ st.markdown("""
     
     /* Mobile (< 768px) */
     @media screen and (max-width: 768px) {
+        /* Header partita - mostra versione mobile, nascondi desktop */
+        .match-header-desktop {
+            display: none !important;
+        }
+        .match-header-mobile {
+            display: flex !important;
+        }
+        
         /* Header partita - più compatto */
         .match-header-container {
             flex-direction: column !important;
@@ -1351,30 +1367,49 @@ if calculate_btn:
     quality = assess_prediction_quality(home_stats, away_stats)
     
     # === SEZIONE RISULTATI ===
-    # Header con loghi squadre - layout fisso su una riga
+    # Header con loghi squadre
     try:
         home_logo_path = get_logo_path(home_team_name)
         away_logo_path = get_logo_path(away_team_name)
         
         st.markdown("---")
         
-        # Prepara HTML loghi con fallback
+        # Prepara HTML loghi
         home_b64 = get_logo_base64_simple(home_logo_path) if home_logo_path else None
         away_b64 = get_logo_base64_simple(away_logo_path) if away_logo_path else None
         
-        home_logo_html = f'<img src="data:image/png;base64,{home_b64}" style="width:40px; height:40px; object-fit:contain;">' if home_b64 else '<span style="font-size:1.5rem;">🏠</span>'
-        away_logo_html = f'<img src="data:image/png;base64,{away_b64}" style="width:40px; height:40px; object-fit:contain;">' if away_b64 else '<span style="font-size:1.5rem;">✈️</span>'
+        home_logo_html = f'<img src="data:image/png;base64,{home_b64}" style="width:50px; height:50px; object-fit:contain;">' if home_b64 else '<span style="font-size:2rem;">🏠</span>'
+        away_logo_html = f'<img src="data:image/png;base64,{away_b64}" style="width:50px; height:50px; object-fit:contain;">' if away_b64 else '<span style="font-size:2rem;">✈️</span>'
+        
+        # Versione DESKTOP (nascosta su mobile)
+        st.markdown(f"""
+        <div class="match-header-desktop" style="display:flex; align-items:center; justify-content:center; gap:20px; padding:15px 0;">
+            <div style="display:flex; align-items:center; gap:12px;">
+                {home_logo_html}
+                <span style="font-size:1.4rem; font-weight:700; color:#ffffff;">{home_team_name}</span>
+            </div>
+            <span style="font-size:1.8rem; font-weight:700; color:#f39c12; margin:0 20px;">VS</span>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <span style="font-size:1.4rem; font-weight:700; color:#ffffff;">{away_team_name}</span>
+                {away_logo_html}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Versione MOBILE (nascosta su desktop) - più compatta
+        home_logo_html_sm = f'<img src="data:image/png;base64,{home_b64}" style="width:30px; height:30px; object-fit:contain;">' if home_b64 else '🏠'
+        away_logo_html_sm = f'<img src="data:image/png;base64,{away_b64}" style="width:30px; height:30px; object-fit:contain;">' if away_b64 else '✈️'
         
         st.markdown(f"""
-        <div style="display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:nowrap; padding:10px 0;">
-            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-                {home_logo_html}
-                <span style="font-size:clamp(0.9rem, 3vw, 1.3rem); font-weight:700; color:#ffffff; white-space:nowrap;">{home_team_name}</span>
+        <div class="match-header-mobile" style="display:none; align-items:center; justify-content:center; gap:8px; padding:10px 0; flex-wrap:nowrap;">
+            <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
+                {home_logo_html_sm}
+                <span style="font-size:0.9rem; font-weight:700; color:#ffffff; white-space:nowrap;">{home_team_name}</span>
             </div>
-            <span style="font-size:clamp(1rem, 3vw, 1.5rem); font-weight:700; color:#f39c12; margin:0 10px;">VS</span>
-            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-                <span style="font-size:clamp(0.9rem, 3vw, 1.3rem); font-weight:700; color:#ffffff; white-space:nowrap;">{away_team_name}</span>
-                {away_logo_html}
+            <span style="font-size:1rem; font-weight:700; color:#f39c12; margin:0 8px;">VS</span>
+            <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
+                <span style="font-size:0.9rem; font-weight:700; color:#ffffff; white-space:nowrap;">{away_team_name}</span>
+                {away_logo_html_sm}
             </div>
         </div>
         """, unsafe_allow_html=True)
