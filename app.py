@@ -197,9 +197,36 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* FORZA tutte le label bianche */
+    /* FORZA tutte le label bianche CON SFONDO TRASPARENTE */
     label, label p, label span, label small {
         color: #ffffff !important;
+        background: transparent !important;
+        background-color: transparent !important;
+    }
+    
+    /* Widget label container - sfondo trasparente */
+    [data-testid="stWidgetLabel"],
+    [data-testid="stWidgetLabel"] > div,
+    .stSelectbox label,
+    .stTextInput label,
+    .stNumberInput label,
+    .stTextArea label {
+        background: transparent !important;
+        background-color: transparent !important;
+    }
+    
+    /* Markdown headers - sfondo trasparente */
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, 
+    .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+        background: transparent !important;
+        color: #ffffff !important;
+    }
+    
+    /* Container elementi - sfondo trasparente nella main area */
+    .main .element-container,
+    .main [data-testid="stVerticalBlock"],
+    .main [data-testid="column"] {
+        background: transparent !important;
     }
     
     /* === INPUT, SELECT, CASELLE === */
@@ -671,9 +698,20 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* Markdown container - testo bianco di default */
+    /* Markdown container - testo bianco e sfondo trasparente */
     .main [data-testid="stMarkdownContainer"] {
         color: #e8f4fc !important;
+        background: transparent !important;
+    }
+    
+    /* IMPORTANTE: Tutti i container nella main area - sfondo trasparente */
+    .main .stMarkdown,
+    .main .element-container,
+    .main [data-testid="stVerticalBlock"] > div,
+    .main [data-testid="column"] > div,
+    .main [data-testid="stHorizontalBlock"] {
+        background: transparent !important;
+        background-color: transparent !important;
     }
     
     /* Fix specifico: card con sfondo chiaro -> testo scuro */
