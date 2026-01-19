@@ -89,6 +89,29 @@ st.markdown("""
         overflow-x: hidden !important;
     }
     
+    /* === SELEZIONE TESTO === */
+    /* Testo selezionato - sfondo chiaro, testo nero */
+    ::selection {
+        background-color: #f39c12 !important;
+        color: #000000 !important;
+    }
+    ::-moz-selection {
+        background-color: #f39c12 !important;
+        color: #000000 !important;
+    }
+    
+    /* Selezione in tutta l'app */
+    .stApp ::selection,
+    .stApp *::selection {
+        background-color: #f39c12 !important;
+        color: #000000 !important;
+    }
+    .stApp ::-moz-selection,
+    .stApp *::-moz-selection {
+        background-color: #f39c12 !important;
+        color: #000000 !important;
+    }
+    
     /* Sfondo generale blu scuro */
     .stApp {
         background: linear-gradient(180deg, #1a3a52 0%, #0d2137 100%);
