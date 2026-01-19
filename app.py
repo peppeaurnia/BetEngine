@@ -89,29 +89,6 @@ st.markdown("""
         overflow-x: hidden !important;
     }
     
-    /* === SELEZIONE TESTO === */
-    /* Testo selezionato - sfondo chiaro, testo nero */
-    ::selection {
-        background-color: #f39c12 !important;
-        color: #000000 !important;
-    }
-    ::-moz-selection {
-        background-color: #f39c12 !important;
-        color: #000000 !important;
-    }
-    
-    /* Selezione in tutta l'app */
-    .stApp ::selection,
-    .stApp *::selection {
-        background-color: #f39c12 !important;
-        color: #000000 !important;
-    }
-    .stApp ::-moz-selection,
-    .stApp *::-moz-selection {
-        background-color: #f39c12 !important;
-        color: #000000 !important;
-    }
-    
     /* Sfondo generale blu scuro */
     .stApp {
         background: linear-gradient(180deg, #1a3a52 0%, #0d2137 100%);
@@ -191,8 +168,8 @@ st.markdown("""
         color: #000000 !important;
     }
     
-    /* Testo principale chiaro */
-    .stApp, .stApp p, .stApp span, .stApp label, .stApp div {
+    /* Testo principale su sfondo scuro - SOLO per elementi diretti */
+    .stApp > div > div > div > [data-testid="stMarkdownContainer"] p {
         color: #e8f4fc;
     }
     
@@ -311,31 +288,56 @@ st.markdown("""
         color: #1a1a2e !important;
     }
     
-    /* Expander */
+    /* Expander - TESTO NERO su sfondo bianco */
     .streamlit-expanderHeader, 
     .streamlit-expanderContent,
     .streamlit-expanderContent p,
     .streamlit-expanderContent span,
-    .streamlit-expanderContent div {
+    .streamlit-expanderContent div,
+    .streamlit-expanderContent strong,
+    .streamlit-expanderContent label {
         color: #1a1a2e !important;
+        background: transparent !important;
     }
     
     [data-testid="stExpander"] {
-        background: #ffffff;
+        background: #ffffff !important;
         border-radius: 10px;
     }
     
+    [data-testid="stExpander"] *,
     [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary *,
     [data-testid="stExpander"] p,
     [data-testid="stExpander"] span,
     [data-testid="stExpander"] div,
     [data-testid="stExpander"] strong,
-    [data-testid="stExpander"] small {
+    [data-testid="stExpander"] small,
+    [data-testid="stExpander"] label,
+    [data-testid="stExpander"] [data-testid="stMarkdownContainer"],
+    [data-testid="stExpander"] [data-testid="stMarkdownContainer"] * {
         color: #1a1a2e !important;
     }
     
-    /* Form e contenitori bianchi */
-    .stForm input, .stForm textarea {
+    /* Form e contenitori bianchi - TESTO NERO */
+    .stForm, .stForm *,
+    .stForm input, .stForm textarea,
+    .stForm label, .stForm p, .stForm span {
+        color: #1a1a2e !important;
+    }
+    
+    /* Form sfondo */
+    [data-testid="stForm"] {
+        background: #ffffff !important;
+        border-radius: 10px;
+        padding: 15px;
+    }
+    
+    [data-testid="stForm"] *,
+    [data-testid="stForm"] label,
+    [data-testid="stForm"] p,
+    [data-testid="stForm"] span,
+    [data-testid="stForm"] div {
         color: #1a1a2e !important;
     }
     
@@ -357,31 +359,26 @@ st.markdown("""
         color: #a0b4c4 !important;
     }
     
-    /* Fix contrasto per qualsiasi testo su sfondo blu scuro */
-    .stApp p, .stApp span, .stApp div {
-        color: #e8f4fc;
-    }
-    
-    /* Testo bianco garantito su sfondi scuri */
-    [data-testid="stMarkdownContainer"] p,
-    [data-testid="stMarkdownContainer"] span,
-    [data-testid="stMarkdownContainer"] strong,
-    [data-testid="stMarkdownContainer"] em {
-        color: #ffffff !important;
-    }
-    
     /* Eccezione: testo scuro negli elementi con sfondo chiaro */
     .stAlert p, .stAlert span, .stAlert div,
     [data-testid="stExpander"] p,
     [data-testid="stExpander"] span,
     [data-testid="stExpander"] div,
-    table td, table th {
+    [data-testid="stExpander"] strong,
+    [data-testid="stExpander"] small,
+    table td {
         color: #1a1a2e !important;
     }
     
-    /* Header tabella - sempre bianco */
+    /* Header tabella con sfondo colorato - testo bianco */
     table th {
         color: #ffffff !important;
+    }
+    
+    /* Celle tabella con sfondo bianco - testo nero */
+    table td {
+        color: #1a1a2e !important;
+        background: #ffffff !important;
     }
     
     /* Stile generale */
@@ -749,12 +746,6 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* Markdown container - testo bianco e sfondo trasparente */
-    .main [data-testid="stMarkdownContainer"] {
-        color: #e8f4fc !important;
-        background: transparent !important;
-    }
-    
     /* IMPORTANTE: Tutti i container nella main area - sfondo trasparente */
     .main .stMarkdown,
     .main .element-container,
@@ -765,17 +756,32 @@ st.markdown("""
         background-color: transparent !important;
     }
     
-    /* Fix specifico: card con sfondo chiaro -> testo scuro */
-    div[style*="background:#f"], 
+    /* === REGOLA FONDAMENTALE: SFONDO CHIARO = TESTO NERO === */
+    /* Qualsiasi elemento con sfondo bianco o chiaro */
+    div[style*="background:#f"],
     div[style*="background: #f"],
     div[style*="background:white"],
     div[style*="background: white"],
     div[style*="background:#fff"],
-    div[style*="background: #fff"] {
+    div[style*="background: #fff"],
+    div[style*="background:#e"],
+    div[style*="background: #e"],
+    div[style*="background:rgb(2"],
+    div[style*="background: rgb(2"] {
         color: #1a1a2e !important;
     }
     
-    /* Fix specifico: card con sfondo colorato -> testo bianco */
+    /* Figli di elementi con sfondo chiaro */
+    div[style*="background:#f"] *,
+    div[style*="background: #f"] *,
+    div[style*="background:white"] *,
+    div[style*="background: white"] *,
+    div[style*="background:#fff"] *,
+    div[style*="background: #fff"] * {
+        color: #1a1a2e !important;
+    }
+    
+    /* === ECCEZIONE: SFONDO COLORATO/SCURO = TESTO BIANCO === */
     div[style*="background:linear-gradient"],
     div[style*="background: linear-gradient"],
     div[style*="background:#3498db"],
@@ -784,7 +790,24 @@ st.markdown("""
     div[style*="background:#9b59b6"],
     div[style*="background:#34495e"],
     div[style*="background:#1a1a2e"],
+    div[style*="background:#1a5f2a"],
+    div[style*="background:#8b1538"],
     div[style*="background:#f39c12"] {
+        color: #ffffff !important;
+    }
+    
+    /* Figli di elementi con sfondo colorato */
+    div[style*="background:linear-gradient"] *,
+    div[style*="background: linear-gradient"] *,
+    div[style*="background:#3498db"] *,
+    div[style*="background:#27ae60"] *,
+    div[style*="background:#e74c3c"] *,
+    div[style*="background:#9b59b6"] *,
+    div[style*="background:#34495e"] *,
+    div[style*="background:#1a1a2e"] *,
+    div[style*="background:#1a5f2a"] *,
+    div[style*="background:#8b1538"] *,
+    div[style*="background:#f39c12"] * {
         color: #ffffff !important;
     }
     
@@ -817,9 +840,31 @@ st.markdown("""
         color: #a8d4f0 !important;
     }
     
-    /* Write/text normale */
-    .stApp .stMarkdown div:not([style]) {
+    /* Testo markdown SOLO nell'area principale (non in expander/form/alert) */
+    .main > div > div > [data-testid="stVerticalBlock"] > div > [data-testid="stMarkdownContainer"]:not([data-testid="stExpander"] *) p {
         color: #e8f4fc !important;
+    }
+    
+    /* OVERRIDE FINALE: Tutto dentro expander = NERO */
+    [data-testid="stExpander"] [data-testid="stMarkdownContainer"],
+    [data-testid="stExpander"] [data-testid="stMarkdownContainer"] *,
+    [data-testid="stExpander"] .stMarkdown,
+    [data-testid="stExpander"] .stMarkdown * {
+        color: #1a1a2e !important;
+    }
+    
+    /* OVERRIDE FINALE: Tutto dentro form = NERO */
+    [data-testid="stForm"] [data-testid="stMarkdownContainer"],
+    [data-testid="stForm"] [data-testid="stMarkdownContainer"] *,
+    [data-testid="stForm"] .stMarkdown,
+    [data-testid="stForm"] .stMarkdown * {
+        color: #1a1a2e !important;
+    }
+    
+    /* OVERRIDE FINALE: Tutto dentro alert = NERO */
+    [data-testid="stAlert"] *,
+    .stAlert * {
+        color: #1a1a2e !important;
     }
 </style>
 """, unsafe_allow_html=True)

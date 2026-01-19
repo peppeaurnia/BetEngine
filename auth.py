@@ -215,7 +215,7 @@ def show_admin_panel():
             color: #ffffff !important;
         }
         
-        /* Bottone "Crea Utente" - testo nero */
+        /* Bottone - testo nero */
         .stTabs [data-baseweb="tab-panel"] .stButton button p,
         .stTabs [data-baseweb="tab-panel"] .stButton button span,
         .stTabs [data-baseweb="tab-panel"] .stFormSubmitButton button p,
@@ -223,11 +223,46 @@ def show_admin_panel():
             color: #000000 !important;
         }
         
-        /* Messaggio info "Nessun utente da gestire" - testo bianco */
+        /* Alert boxes - testo NERO (sfondo chiaro) */
         .stTabs [data-baseweb="tab-panel"] .stAlert p,
         .stTabs [data-baseweb="tab-panel"] .stAlert span,
-        .stTabs [data-baseweb="tab-panel"] [data-testid="stAlert"] p {
-            color: #ffffff !important;
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stAlert"] p,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stAlert"] span {
+            color: #1a1a2e !important;
+        }
+        
+        /* EXPANDER nel pannello admin - sfondo bianco, testo NERO */
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stExpander"] {
+            background: #ffffff !important;
+            border-radius: 10px;
+        }
+        
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stExpander"] *,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stExpander"] summary,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stExpander"] p,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stExpander"] span,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stExpander"] div,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stExpander"] strong,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stExpander"] label {
+            color: #1a1a2e !important;
+        }
+        
+        /* Form nel pannello admin - testo nero */
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stForm"] {
+            background: #ffffff !important;
+            border-radius: 10px;
+            padding: 15px;
+        }
+        
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stForm"] p,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stForm"] span,
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stForm"] div:not([data-testid="stWidgetLabel"]) {
+            color: #1a1a2e !important;
+        }
+        
+        /* Ma le label del form restano bianche (sfondo scuro dietro) */
+        .stTabs [data-baseweb="tab-panel"] [data-testid="stForm"] [data-testid="stWidgetLabel"] p {
+            color: #1a1a2e !important;
         }
     </style>
     """, unsafe_allow_html=True)
