@@ -498,10 +498,22 @@ st.markdown("""
     button[title="View fullscreen"] {display: none;}
     [data-testid="StyledFullScreenButton"] {display: none;}
     
-    /* Card statistiche squadre - testo nero per label e valori */
+    /* Card statistiche squadre - FORZA testo nero ovunque */
+    .team-stats-card,
+    .team-stats-card *,
     .team-stats-card h4,
     .team-stats-card small,
-    .team-stats-card div {
+    .team-stats-card div,
+    .team-stats-card span,
+    div.team-stats-card h4,
+    [class*="team-stats-card"] h4,
+    [class*="team-stats-card"] * {
+        color: #000000 !important;
+    }
+    
+    /* Override specifico per h4 dentro team-stats-card */
+    .stMarkdown .team-stats-card h4,
+    [data-testid="stMarkdownContainer"] .team-stats-card h4 {
         color: #000000 !important;
     }
     
@@ -742,8 +754,22 @@ st.markdown("""
        ============================================================ */
     
     /* Testo principale su sfondo scuro - sempre chiaro */
-    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {
+    .stApp h1, .stApp h2, .stApp h3, .stApp h5, .stApp h6 {
         color: #ffffff !important;
+    }
+    
+    /* h4 bianco di default */
+    .stApp h4 {
+        color: #ffffff !important;
+    }
+    
+    /* OVERRIDE FINALE: h4 dentro team-stats-card = NERO (priorità massima) */
+    .team-stats-card h4,
+    .stApp .team-stats-card h4,
+    div.team-stats-card h4,
+    [data-testid="stMarkdownContainer"] .team-stats-card h4,
+    .stMarkdown .team-stats-card h4 {
+        color: #000000 !important;
     }
     
     /* IMPORTANTE: Tutti i container nella main area - sfondo trasparente */
@@ -865,6 +891,19 @@ st.markdown("""
     [data-testid="stAlert"] *,
     .stAlert * {
         color: #1a1a2e !important;
+    }
+    
+    /* ============================================================
+       OVERRIDE PRIORITÀ MASSIMA - TEAM STATS CARD
+       ============================================================ */
+    /* Questa regola DEVE essere in fondo per avere priorità massima */
+    .team-stats-card h4,
+    .team-stats-card h4 *,
+    div.team-stats-card h4,
+    .stApp .team-stats-card h4,
+    .main .team-stats-card h4,
+    [data-testid="stMarkdownContainer"] .team-stats-card h4 {
+        color: #000000 !important;
     }
 </style>
 """, unsafe_allow_html=True)
