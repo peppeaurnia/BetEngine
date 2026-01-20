@@ -68,6 +68,7 @@ BACKTESTING_AVAILABLE = False
 try:
     from backtesting import (
         init_backtesting,
+        save_prediction,
         save_match_predictions,
         display_backtesting_dashboard,
         get_user_statistics
@@ -76,6 +77,7 @@ try:
 except ImportError:
     # Backtesting non disponibile
     def init_backtesting(): return False
+    def save_prediction(*args, **kwargs): return False
     def save_match_predictions(*args, **kwargs): return 0
     def display_backtesting_dashboard(*args, **kwargs): pass
     def get_user_statistics(*args, **kwargs): return {}
@@ -1529,36 +1531,6 @@ if calculate_btn:
     # Valuta qualità previsione
     quality = assess_prediction_quality(home_stats, away_stats)
     
-    # === SALVATAGGIO AUTOMATICO PREVISIONI (BACKTESTING) ===
-    if BACKTESTING_AVAILABLE:
-        try:
-            init_backtesting()
-            username = get_current_user()
-            user_id = get_user_id(username)
-            
-            if user_id:
-                # Genera un match_id unico (combinazione team IDs + data)
-                match_id_str = f"{home_team_id}_{away_team_id}_{match_date.strftime('%Y%m%d')}"
-                match_id = hash(match_id_str) % 10000000  # ID numerico
-                
-                # Salva tutte le previsioni
-                saved_count = save_match_predictions(
-                    user_id=user_id,
-                    match_id=match_id,
-                    match_date=match_date.strftime('%Y-%m-%d'),
-                    league_id=selected_league_id,
-                    league_name=selected_league_name,
-                    home_team=home_team_name,
-                    away_team=away_team_name,
-                    probabilities=probabilities
-                )
-                
-                if saved_count > 0:
-                    st.toast(f"💾 {saved_count} previsioni salvate per il backtesting!", icon="✅")
-        except Exception as e:
-            # Non bloccare l'app se il salvataggio fallisce
-            print(f"Errore salvataggio backtesting: {e}")
-    
     # === SEZIONE RISULTATI ===
     # Header con loghi squadre
     try:
@@ -1635,6 +1607,52 @@ if calculate_btn:
     # === PRONOSTICI CONSIGLIATI ===
     top_predictions = calculate_top_predictions(probabilities, home_team_name, away_team_name)
     display_top_predictions(top_predictions)
+    
+    # === SALVATAGGIO SOLO TOP PREDICTIONS (BACKTESTING) ===
+    if BACKTESTING_AVAILABLE and top_predictions:
+        try:
+            init_backtesting()
+            username = get_current_user()
+            user_id = get_user_id(username)
+            
+            if user_id:
+                # Genera un match_id unico
+                match_id_str = f"{home_team_id}_{away_team_id}_{match_date.strftime('%Y%m%d')}"
+                match_id = hash(match_id_str) % 10000000
+                
+                saved_count = 0
+                for pred in top_predictions:
+                    # Determina il mercato
+                    if pred['short'] in ['1', 'X', '2']:
+                        market = '1X2'
+                    elif pred['short'] in ['GG', 'NG']:
+                        market = 'BTTS'
+                    elif pred['short'].startswith('O') or pred['short'].startswith('U'):
+                        market = 'Over/Under'
+                    elif pred['short'].startswith('C'):
+                        market = 'Cards'
+                    else:
+                        market = 'Altro'
+                    
+                    if save_prediction(
+                        user_id=user_id,
+                        match_id=match_id,
+                        match_date=match_date.strftime('%Y-%m-%d'),
+                        league_id=selected_league_id,
+                        league_name=selected_league_name,
+                        home_team=home_team_name,
+                        away_team=away_team_name,
+                        market=market,
+                        selection=pred['short'],
+                        predicted_prob=pred['prob'] / 100,  # Converti in decimale
+                        confidence_stars=pred.get('stars', 3)
+                    ):
+                        saved_count += 1
+                
+                if saved_count > 0:
+                    st.toast(f"💾 {saved_count} pronostici salvati!", icon="✅")
+        except Exception as e:
+            print(f"Errore salvataggio backtesting: {e}")
     
     st.markdown("---")
     
