@@ -95,8 +95,8 @@ def create_user(username: str, password: str, email: str = None,
         subscription_end = datetime.now() + timedelta(days=subscription_days)
         
         cursor.execute("""
-            INSERT INTO users (username, password_hash, email, is_admin, subscription_end)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO users (username, password_hash, email, is_admin, is_active, subscription_end)
+            VALUES (%s, %s, %s, %s, 1, %s)
         """, (username, hash_password(password), email, int(is_admin), subscription_end))
         
         conn.commit()
@@ -170,6 +170,20 @@ def update_last_login(username: str):
     conn.commit()
     cursor.close()
     conn.close()
+
+
+def get_user_id(username: str) -> Optional[int]:
+    """Restituisce l'ID utente dato lo username."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+    row = cursor.fetchone()
+    
+    cursor.close()
+    conn.close()
+    
+    return row[0] if row else None
 
 
 def get_all_users() -> List[Dict]:

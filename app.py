@@ -47,7 +47,13 @@ from auth import (
     show_admin_panel,
     show_user_info_sidebar
 )
-from database import init_database
+from database import init_database, get_user_id
+from backtesting import (
+    init_backtesting,
+    save_match_predictions,
+    display_backtesting_dashboard,
+    get_user_statistics
+)
 
 
 def get_logo_base64_simple(logo_path):
@@ -1285,6 +1291,21 @@ if is_admin():
         st.markdown("---")
         st.stop()  # Non mostrare l'app principale quando si è nel pannello admin
 
+# Pannello Backtesting - per tutti gli utenti
+backtesting_tab = st.sidebar.checkbox("📊 Statistiche & Backtesting", value=False)
+if backtesting_tab:
+    try:
+        init_backtesting()
+        username = get_current_user()
+        user_id = get_user_id(username)
+        if user_id:
+            display_backtesting_dashboard(user_id, API_FOOTBALL_KEY)
+        else:
+            st.error("Errore: impossibile recuperare l'ID utente")
+    except Exception as e:
+        st.error(f"Errore backtesting: {e}")
+    st.stop()
+
 # ============================================================
 # SIDEBAR - CONFIGURAZIONE
 # ============================================================
@@ -1398,12 +1419,12 @@ with col3:
         key="away_team"
     )
 
-# Input opzionale arbitro
-st.markdown("#### 👨‍⚖️ Arbitro (opzionale)")
-col_ref1, col_ref2 = st.columns([2, 1])
+# Input opzionale arbitro e data partita
+st.markdown("#### 📋 Dettagli Partita (opzionale)")
+col_ref1, col_ref2, col_date = st.columns([2, 1, 1])
 with col_ref1:
     referee_name = st.text_input(
-        "Nome arbitro",
+        "👨‍⚖️ Arbitro",
         placeholder="Es: Orsato, Guida, Mariani...",
         help="Inserisci anche solo il cognome! Es: 'Feliciani' trova 'Luca Feliciani'",
         key="referee_input"
@@ -1427,6 +1448,15 @@ with col_ref2:
                 st.caption("❌ Non trovato nel database")
         except Exception as e:
             st.caption(f"⚠️ Errore: {e}")
+with col_date:
+    from datetime import date, timedelta
+    match_date = st.date_input(
+        "📅 Data Partita",
+        value=date.today(),
+        min_value=date.today() - timedelta(days=7),
+        max_value=date.today() + timedelta(days=30),
+        help="Data della partita (per il backtesting)"
+    )
 
 # Pulsante calcola
 col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
@@ -1472,6 +1502,35 @@ if calculate_btn:
     
     # Valuta qualità previsione
     quality = assess_prediction_quality(home_stats, away_stats)
+    
+    # === SALVATAGGIO AUTOMATICO PREVISIONI (BACKTESTING) ===
+    try:
+        init_backtesting()
+        username = get_current_user()
+        user_id = get_user_id(username)
+        
+        if user_id:
+            # Genera un match_id unico (combinazione team IDs + data)
+            match_id_str = f"{home_team_id}_{away_team_id}_{match_date.strftime('%Y%m%d')}"
+            match_id = hash(match_id_str) % 10000000  # ID numerico
+            
+            # Salva tutte le previsioni
+            saved_count = save_match_predictions(
+                user_id=user_id,
+                match_id=match_id,
+                match_date=match_date.strftime('%Y-%m-%d'),
+                league_id=selected_league_id,
+                league_name=selected_league_name,
+                home_team=home_team_name,
+                away_team=away_team_name,
+                probabilities=probabilities
+            )
+            
+            if saved_count > 0:
+                st.toast(f"💾 {saved_count} previsioni salvate per il backtesting!", icon="✅")
+    except Exception as e:
+        # Non bloccare l'app se il salvataggio fallisce
+        print(f"Errore salvataggio backtesting: {e}")
     
     # === SEZIONE RISULTATI ===
     # Header con loghi squadre
