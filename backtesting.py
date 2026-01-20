@@ -630,14 +630,77 @@ def get_best_predictions(user_id: int, min_prob: float = 0.55, limit: int = 20) 
 # UI STREAMLIT
 # ============================================================
 
+def delete_prediction(prediction_id: int) -> bool:
+    """Elimina una singola previsione."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("DELETE FROM predictions WHERE id = %s", (prediction_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        print(f"Errore eliminazione: {e}")
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def delete_match_predictions(user_id: int, match_id: int) -> int:
+    """Elimina tutte le previsioni di una partita."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(
+            "DELETE FROM predictions WHERE user_id = %s AND match_id = %s",
+            (user_id, match_id)
+        )
+        deleted = cursor.rowcount
+        conn.commit()
+        return deleted
+    except Exception as e:
+        conn.rollback()
+        print(f"Errore eliminazione: {e}")
+        return 0
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def delete_all_predictions(user_id: int) -> int:
+    """Elimina TUTTE le previsioni di un utente."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("DELETE FROM predictions WHERE user_id = %s", (user_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        return deleted
+    except Exception as e:
+        conn.rollback()
+        print(f"Errore eliminazione: {e}")
+        return 0
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def display_backtesting_dashboard(user_id: int, api_key: str):
-    """
-    Mostra la dashboard completa di backtesting.
-    """
+    """Mostra la dashboard completa di backtesting."""
+    
     st.header("📊 Backtesting & Statistiche")
     
     # Tabs
-    tab1, tab2, tab3 = st.tabs(["📈 Statistiche", "📋 Storico", "🔄 Aggiorna Risultati"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📈 Statistiche", 
+        "📋 Storico", 
+        "🔄 Aggiorna",
+        "🗑️ Gestione"
+    ])
     
     with tab1:
         display_statistics_tab(user_id)
@@ -647,6 +710,9 @@ def display_backtesting_dashboard(user_id: int, api_key: str):
     
     with tab3:
         display_update_tab(user_id, api_key)
+    
+    with tab4:
+        display_manage_tab(user_id)
 
 
 def display_statistics_tab(user_id: int):
@@ -655,10 +721,10 @@ def display_statistics_tab(user_id: int):
     col1, col2 = st.columns([1, 3])
     
     with col1:
-        days = st.selectbox("Periodo", [7, 14, 30, 90, 365], index=2)
+        days = st.selectbox("Periodo", [7, 14, 30, 90, 365], index=2, key="stats_days")
     
     with col2:
-        if st.button("🔄 Aggiorna Statistiche", use_container_width=True):
+        if st.button("🔄 Aggiorna", use_container_width=True, key="refresh_stats"):
             st.rerun()
     
     # Carica statistiche
@@ -669,79 +735,67 @@ def display_statistics_tab(user_id: int):
         return
     
     # KPI principali
-    st.subheader("📊 Performance Generale")
+    st.markdown("### 📊 Performance Generale")
     
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     
     with kpi1:
-        st.metric(
-            "🎯 Accuracy",
-            f"{stats['accuracy']}%",
-            help="Percentuale previsioni corrette"
-        )
+        st.metric("🎯 Accuracy", f"{stats['accuracy']}%")
     
     with kpi2:
-        roi_color = "normal" if stats['roi'] >= 0 else "inverse"
-        st.metric(
-            "📈 ROI Simulato",
-            f"{stats['roi']:+.1f}%",
-            delta=f"€{stats['profit']:+.2f}",
-            delta_color=roi_color,
-            help="Return on Investment (simulato con stake €10, quota 1.85)"
-        )
+        st.metric("📈 ROI", f"{stats['roi']:+.1f}%", delta=f"€{stats['profit']:+.2f}")
     
     with kpi3:
-        st.metric(
-            "✅ Vinte",
-            stats['general']['won'],
-            help="Previsioni corrette"
-        )
+        st.metric("✅ Vinte", stats['general']['won'])
     
     with kpi4:
-        st.metric(
-            "❌ Perse",
-            stats['general']['lost'],
-            help="Previsioni errate"
-        )
+        st.metric("❌ Perse", stats['general']['lost'])
     
-    # Dettaglio
     st.markdown("---")
     
+    # Dettaglio per mercato
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("📊 Per Mercato")
+        st.markdown("### 📊 Per Mercato")
         
         if stats['by_market']:
             for market in stats['by_market']:
                 accuracy = market['accuracy'] or 0
-                color = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
+                emoji = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
+                
                 st.markdown(f"""
-                **{market['market']}** {color}
-                - Totale: {market['total']} | ✅ {market['won']} | ❌ {market['lost']}
-                - Accuracy: **{accuracy}%**
-                """)
+                <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:8px; margin-bottom:8px;">
+                    <strong style="color:#ffffff;">{emoji} {market['market']}</strong><br>
+                    <span style="color:#a8d4f0;">Totale: {market['total']} | ✅ {market['won']} | ❌ {market['lost']}</span><br>
+                    <span style="color:#4fc3f7; font-size:1.2em;"><strong>{accuracy}%</strong></span>
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.info("Nessun dato per mercato")
+            st.info("Nessun dato")
     
     with col2:
-        st.subheader("🏆 Per Lega")
+        st.markdown("### 🏆 Per Lega")
         
         if stats['by_league']:
             for league in stats['by_league'][:5]:
                 accuracy = league['accuracy'] or 0
-                color = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
+                emoji = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
+                
                 st.markdown(f"""
-                **{league['league_name']}** {color}
-                - Totale: {league['total']} | Accuracy: **{accuracy}%**
-                """)
+                <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:8px; margin-bottom:8px;">
+                    <strong style="color:#ffffff;">{emoji} {league['league_name']}</strong><br>
+                    <span style="color:#a8d4f0;">Totale: {league['total']}</span><br>
+                    <span style="color:#4fc3f7; font-size:1.2em;"><strong>{accuracy}%</strong></span>
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.info("Nessun dato per lega")
+            st.info("Nessun dato")
     
-    # Stato previsioni
     st.markdown("---")
-    st.subheader("📋 Stato Previsioni")
     
+    # Stato
+    st.markdown("### 📋 Riepilogo")
     status1, status2, status3 = st.columns(3)
     
     with status1:
@@ -751,7 +805,7 @@ def display_statistics_tab(user_id: int):
         st.metric("⏳ Da aggiornare", stats['general']['pending_update'])
     
     with status3:
-        st.metric("🔮 Partite future", stats['general']['pending_match'])
+        st.metric("🔮 Future", stats['general']['pending_match'])
 
 
 def display_history_tab(user_id: int):
@@ -762,14 +816,15 @@ def display_history_tab(user_id: int):
     with col1:
         market_filter = st.selectbox(
             "Mercato",
-            ["Tutti", "1X2", "BTTS", "Over/Under", "Cards"]
+            ["Tutti", "1X2", "BTTS", "Over/Under", "Cards"],
+            key="history_market"
         )
     
     with col2:
-        only_settled = st.checkbox("Solo concluse", value=False)
+        only_settled = st.checkbox("Solo concluse", value=False, key="history_settled")
     
     with col3:
-        limit = st.selectbox("Mostra", [20, 50, 100], index=1)
+        limit = st.selectbox("Mostra", [20, 50, 100], index=0, key="history_limit")
     
     # Carica storico
     market = market_filter if market_filter != "Tutti" else None
@@ -779,38 +834,55 @@ def display_history_tab(user_id: int):
         st.info("📭 Nessuna previsione trovata")
         return
     
-    # Mostra tabella
+    st.markdown(f"### 📋 Ultime {len(history)} Previsioni")
+    
+    # Mostra previsioni
     for pred in history:
         # Colore stato
         if pred['is_won'] is None:
             status = "⏳"
-            bg_color = "#f0f2f6"
+            border_color = "#f39c12"
+            bg_color = "rgba(243, 156, 18, 0.2)"
         elif pred['is_won'] == 1:
             status = "✅"
-            bg_color = "#d4edda"
+            border_color = "#27ae60"
+            bg_color = "rgba(39, 174, 96, 0.2)"
         else:
             status = "❌"
-            bg_color = "#f8d7da"
+            border_color = "#e74c3c"
+            bg_color = "rgba(231, 76, 60, 0.2)"
         
         # Formatta data
         match_date = pred['match_date']
         if isinstance(match_date, str):
             date_str = match_date
         else:
-            date_str = match_date.strftime("%d/%m") if match_date else "N/A"
+            date_str = match_date.strftime("%d/%m/%Y") if match_date else "N/A"
         
         prob_pct = pred['predicted_prob'] * 100 if pred['predicted_prob'] else 0
         
         result_str = ""
         if pred['home_goals'] is not None:
-            result_str = f" ({pred['home_goals']}-{pred['away_goals']})"
+            result_str = f"<strong style='color:#4fc3f7;'>({pred['home_goals']}-{pred['away_goals']})</strong>"
+        
+        actual_str = ""
+        if pred['actual_result']:
+            actual_str = f"<span style='color:#a8d4f0;'>→ {pred['actual_result']}</span>"
         
         st.markdown(f"""
-        <div style="background:{bg_color}; padding:10px; border-radius:8px; margin-bottom:8px; color:#1a1a2e;">
-            <strong>{status} {date_str}</strong> - {pred['league_name']}<br>
-            {pred['home_team']} vs {pred['away_team']}{result_str}<br>
-            <strong>{pred['market']}</strong>: {pred['selection']} @ {prob_pct:.1f}%
-            {f" → {pred['actual_result']}" if pred['actual_result'] else ""}
+        <div style="background:{bg_color}; border-left:4px solid {border_color}; 
+                    padding:12px; border-radius:8px; margin-bottom:10px;">
+            <div style="color:#ffffff; font-weight:bold; font-size:1.1em;">
+                {status} {pred['home_team']} vs {pred['away_team']} {result_str}
+            </div>
+            <div style="color:#a8d4f0; font-size:0.9em; margin-top:4px;">
+                📅 {date_str} | 🏆 {pred['league_name']}
+            </div>
+            <div style="color:#ffffff; margin-top:8px;">
+                <strong>{pred['market']}</strong>: 
+                <span style="color:#4fc3f7; font-weight:bold;">{pred['selection']}</span> 
+                @ {prob_pct:.0f}% {actual_str}
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -818,12 +890,12 @@ def display_history_tab(user_id: int):
 def display_update_tab(user_id: int, api_key: str):
     """Tab aggiornamento risultati."""
     
+    st.markdown("### 🔄 Aggiorna Risultati")
     st.markdown("""
-    ### 🔄 Aggiorna Risultati
-    
-    Clicca il bottone per recuperare i risultati delle partite concluse 
-    e aggiornare le statistiche.
-    """)
+    <p style="color:#a8d4f0;">
+    Clicca per recuperare i risultati delle partite concluse e calcolare le statistiche.
+    </p>
+    """, unsafe_allow_html=True)
     
     if st.button("🔄 Aggiorna Risultati Partite", type="primary", use_container_width=True):
         with st.spinner("Recupero risultati in corso..."):
@@ -834,16 +906,16 @@ def display_update_tab(user_id: int, api_key: str):
         
         - Partite controllate: **{stats['checked']}**
         - Previsioni aggiornate: **{stats['updated']}**
-        - Partite non ancora concluse: {stats['not_finished']}
-        - Errori: {stats['errors']}
+        - Non ancora concluse: {stats['not_finished']}
         """)
         
-        st.balloons()
+        if stats['updated'] > 0:
+            st.balloons()
     
     st.markdown("---")
     
     # Mostra previsioni in attesa
-    st.subheader("⏳ Previsioni in Attesa")
+    st.markdown("### ⏳ Partite da Aggiornare")
     
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -863,9 +935,108 @@ def display_update_tab(user_id: int, api_key: str):
     if pending:
         for match in pending:
             date_str = match['match_date'].strftime("%d/%m") if match['match_date'] else "N/A"
-            st.markdown(f"- **{date_str}** {match['home_team']} vs {match['away_team']} ({match['league_name']})")
+            st.markdown(f"""
+            <div style="background:rgba(243, 156, 18, 0.2); border-left:4px solid #f39c12; 
+                        padding:10px; border-radius:8px; margin-bottom:8px;">
+                <span style="color:#ffffff;"><strong>📅 {date_str}</strong></span>
+                <span style="color:#a8d4f0;"> {match['home_team']} vs {match['away_team']}</span>
+                <span style="color:#7fb3d3; font-size:0.9em;"> ({match['league_name']})</span>
+            </div>
+            """, unsafe_allow_html=True)
     else:
         st.success("✅ Tutte le previsioni sono aggiornate!")
+
+
+def display_manage_tab(user_id: int):
+    """Tab gestione - elimina previsioni."""
+    
+    st.markdown("### 🗑️ Gestione Previsioni")
+    
+    # Carica partite
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cursor.execute("""
+        SELECT DISTINCT match_id, match_date, home_team, away_team, league_name,
+               COUNT(*) as num_predictions
+        FROM predictions
+        WHERE user_id = %s
+        GROUP BY match_id, match_date, home_team, away_team, league_name
+        ORDER BY match_date DESC
+        LIMIT 50
+    """, (user_id,))
+    
+    matches = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    if not matches:
+        st.info("📭 Nessuna partita da gestire")
+        return
+    
+    st.markdown(f"""
+    <p style="color:#a8d4f0;">
+    Hai <strong style="color:#4fc3f7;">{len(matches)}</strong> partite salvate. 
+    Seleziona quelle da eliminare.
+    </p>
+    """, unsafe_allow_html=True)
+    
+    # Lista partite con checkbox
+    st.markdown("---")
+    
+    # Container per le selezioni
+    matches_to_delete = []
+    
+    for i, match in enumerate(matches):
+        date_str = match['match_date'].strftime("%d/%m/%Y") if match['match_date'] else "N/A"
+        
+        col1, col2 = st.columns([4, 1])
+        
+        with col1:
+            st.markdown(f"""
+            <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:8px;">
+                <span style="color:#ffffff;"><strong>{match['home_team']} vs {match['away_team']}</strong></span><br>
+                <span style="color:#a8d4f0; font-size:0.9em;">
+                    📅 {date_str} | 🏆 {match['league_name']} | 
+                    📊 {match['num_predictions']} pronostici
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            if st.button("🗑️", key=f"del_{match['match_id']}_{i}", help="Elimina questa partita"):
+                deleted = delete_match_predictions(user_id, match['match_id'])
+                if deleted > 0:
+                    st.success(f"✅ Eliminati {deleted} pronostici!")
+                    st.rerun()
+                else:
+                    st.error("❌ Errore eliminazione")
+        
+        st.markdown("<div style='margin-bottom:8px;'></div>", unsafe_allow_html=True)
+    
+    # Pulsante elimina tutto
+    st.markdown("---")
+    st.markdown("### ⚠️ Zona Pericolosa")
+    
+    st.markdown("""
+    <p style="color:#e74c3c;">
+    Attenzione: questa azione è irreversibile!
+    </p>
+    """, unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        confirm = st.checkbox("✅ Confermo di voler eliminare TUTTE le previsioni", key="confirm_delete_all")
+    
+    with col2:
+        if st.button("🗑️ ELIMINA TUTTO", type="primary", disabled=not confirm):
+            deleted = delete_all_predictions(user_id)
+            if deleted > 0:
+                st.success(f"✅ Eliminate {deleted} previsioni!")
+                st.rerun()
+            else:
+                st.info("Nessuna previsione da eliminare")
 
 
 # ============================================================
