@@ -43,17 +43,42 @@ from auth import (
     init_session,
     is_authenticated,
     is_admin,
+    get_current_user,
     show_login_page,
     show_admin_panel,
     show_user_info_sidebar
 )
-from database import init_database, get_user_id
-from backtesting import (
-    init_backtesting,
-    save_match_predictions,
-    display_backtesting_dashboard,
-    get_user_statistics
-)
+from database import init_database
+try:
+    from database import get_user_id
+except ImportError:
+    # Fallback se la funzione non esiste ancora
+    def get_user_id(username):
+        from database import get_connection
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return row[0] if row else None
+
+# Backtesting (opzionale - potrebbe non essere installato)
+BACKTESTING_AVAILABLE = False
+try:
+    from backtesting import (
+        init_backtesting,
+        save_match_predictions,
+        display_backtesting_dashboard,
+        get_user_statistics
+    )
+    BACKTESTING_AVAILABLE = True
+except ImportError:
+    # Backtesting non disponibile
+    def init_backtesting(): return False
+    def save_match_predictions(*args, **kwargs): return 0
+    def display_backtesting_dashboard(*args, **kwargs): pass
+    def get_user_statistics(*args, **kwargs): return {}
 
 
 def get_logo_base64_simple(logo_path):
@@ -1292,19 +1317,20 @@ if is_admin():
         st.stop()  # Non mostrare l'app principale quando si è nel pannello admin
 
 # Pannello Backtesting - per tutti gli utenti
-backtesting_tab = st.sidebar.checkbox("📊 Statistiche & Backtesting", value=False)
-if backtesting_tab:
-    try:
-        init_backtesting()
-        username = get_current_user()
-        user_id = get_user_id(username)
-        if user_id:
-            display_backtesting_dashboard(user_id, API_FOOTBALL_KEY)
-        else:
-            st.error("Errore: impossibile recuperare l'ID utente")
-    except Exception as e:
-        st.error(f"Errore backtesting: {e}")
-    st.stop()
+if BACKTESTING_AVAILABLE:
+    backtesting_tab = st.sidebar.checkbox("📊 Statistiche & Backtesting", value=False)
+    if backtesting_tab:
+        try:
+            init_backtesting()
+            username = get_current_user()
+            user_id = get_user_id(username)
+            if user_id:
+                display_backtesting_dashboard(user_id, API_FOOTBALL_KEY)
+            else:
+                st.error("Errore: impossibile recuperare l'ID utente")
+        except Exception as e:
+            st.error(f"Errore backtesting: {e}")
+        st.stop()
 
 # ============================================================
 # SIDEBAR - CONFIGURAZIONE
@@ -1504,33 +1530,34 @@ if calculate_btn:
     quality = assess_prediction_quality(home_stats, away_stats)
     
     # === SALVATAGGIO AUTOMATICO PREVISIONI (BACKTESTING) ===
-    try:
-        init_backtesting()
-        username = get_current_user()
-        user_id = get_user_id(username)
-        
-        if user_id:
-            # Genera un match_id unico (combinazione team IDs + data)
-            match_id_str = f"{home_team_id}_{away_team_id}_{match_date.strftime('%Y%m%d')}"
-            match_id = hash(match_id_str) % 10000000  # ID numerico
+    if BACKTESTING_AVAILABLE:
+        try:
+            init_backtesting()
+            username = get_current_user()
+            user_id = get_user_id(username)
             
-            # Salva tutte le previsioni
-            saved_count = save_match_predictions(
-                user_id=user_id,
-                match_id=match_id,
-                match_date=match_date.strftime('%Y-%m-%d'),
-                league_id=selected_league_id,
-                league_name=selected_league_name,
-                home_team=home_team_name,
-                away_team=away_team_name,
-                probabilities=probabilities
-            )
-            
-            if saved_count > 0:
-                st.toast(f"💾 {saved_count} previsioni salvate per il backtesting!", icon="✅")
-    except Exception as e:
-        # Non bloccare l'app se il salvataggio fallisce
-        print(f"Errore salvataggio backtesting: {e}")
+            if user_id:
+                # Genera un match_id unico (combinazione team IDs + data)
+                match_id_str = f"{home_team_id}_{away_team_id}_{match_date.strftime('%Y%m%d')}"
+                match_id = hash(match_id_str) % 10000000  # ID numerico
+                
+                # Salva tutte le previsioni
+                saved_count = save_match_predictions(
+                    user_id=user_id,
+                    match_id=match_id,
+                    match_date=match_date.strftime('%Y-%m-%d'),
+                    league_id=selected_league_id,
+                    league_name=selected_league_name,
+                    home_team=home_team_name,
+                    away_team=away_team_name,
+                    probabilities=probabilities
+                )
+                
+                if saved_count > 0:
+                    st.toast(f"💾 {saved_count} previsioni salvate per il backtesting!", icon="✅")
+        except Exception as e:
+            # Non bloccare l'app se il salvataggio fallisce
+            print(f"Errore salvataggio backtesting: {e}")
     
     # === SEZIONE RISULTATI ===
     # Header con loghi squadre
