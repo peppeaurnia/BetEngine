@@ -1170,14 +1170,14 @@ def calculate_top_predictions(probabilities: dict, home_team: str, away_team: st
     predictions.append({
         'name': 'Gol (BTTS Sì)',
         'short': 'GG',
-        'prob': probabilities.get('btts_yes', 0) * 100,
-        'icon': '✅'
+        'prob': probabilities.get('p_btts_yes', 0) * 100,
+        'icon': '⚽'
     })
     predictions.append({
         'name': 'NoGol (BTTS No)',
         'short': 'NG',
-        'prob': probabilities.get('btts_no', 0) * 100,
-        'icon': '❌'
+        'prob': probabilities.get('p_btts_no', 0) * 100,
+        'icon': '🚫'
     })
     
     # === CARTELLINI OVER/UNDER 3.5 ===
