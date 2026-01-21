@@ -37,7 +37,6 @@ from data_fetcher import (
     get_team_shots_avg,
     get_current_season
 )
-from injuries_impact import get_injury_adjustment, display_injuries_impact
 from team_logos import get_logo_path
 from config import API_FOOTBALL_KEY, DEFAULT_LEAGUE
 from auth import (
@@ -1517,26 +1516,13 @@ if calculate_btn:
         )
     
     # Recupera dati aggiuntivi
-    with st.spinner("🔍 Recupero dati avanzati (H2H, Tiri, Infortuni)..."):
+    with st.spinner("🔍 Recupero dati avanzati (H2H, Tiri)..."):
         # Head to Head
         h2h_data = get_head_to_head(api_key, home_team_id, away_team_id, last_n=10)
         
         # Media tiri ultime 5 partite
         home_shots = get_team_shots_avg(api_key, home_team_id, selected_league_id, selected_season, last_n=5)
         away_shots = get_team_shots_avg(api_key, away_team_id, selected_league_id, selected_season, last_n=5)
-        
-        # 🏥 INFORTUNI E SQUALIFICHE (NUOVO!)
-        try:
-            injuries_data = get_injury_adjustment(
-                api_key, 
-                home_team_id, 
-                away_team_id, 
-                season=selected_season,
-                use_api_positions=False  # Usa solo database KEY_PLAYERS per risparmiare chiamate
-            )
-        except Exception as e:
-            print(f"Errore recupero infortuni: {e}")
-            injuries_data = None
     
     # Calcola probabilità
     with st.spinner("🧮 Calcolo probabilità..."):
@@ -1546,8 +1532,7 @@ if calculate_btn:
             home_shots=home_shots,
             away_shots=away_shots,
             referee_name=referee_name if referee_name else None,
-            league_name=selected_league_name,
-            injuries_data=injuries_data  # NUOVO!
+            league_name=selected_league_name
         )
     
     # Valuta qualità previsione
@@ -1623,16 +1608,6 @@ if calculate_btn:
         st.metric("⚽ xG Trasferta", f"{probabilities['mu_away']:.2f}")
     with metric_col3:
         st.metric("📈 Tot. Gol Attesi", f"{probabilities['total_expected_goals']:.2f}")
-    
-    # === 🏥 SEZIONE INFORTUNI (se ci sono dati) ===
-    if injuries_data:
-        home_injuries = injuries_data.get("home_injuries", [])
-        away_injuries = injuries_data.get("away_injuries", [])
-        
-        # Mostra solo se ci sono infortuni
-        if home_injuries or away_injuries:
-            st.markdown("---")
-            display_injuries_impact(injuries_data)
     
     st.markdown("---")
     
