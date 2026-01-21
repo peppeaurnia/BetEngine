@@ -1525,6 +1525,7 @@ with col1:
     home_team_name = st.selectbox(
         "Seleziona squadra casa",
         options=list(team_names.keys()),
+        format_func=get_display_name,
         key="home_team"
     )
 
@@ -1539,6 +1540,7 @@ with col3:
     away_team_name = st.selectbox(
         "Seleziona squadra trasferta",
         options=away_options,
+        format_func=get_display_name,
         key="away_team"
     )
 
