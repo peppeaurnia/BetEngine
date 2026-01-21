@@ -56,7 +56,37 @@ from data_fetcher import (
     get_team_shots_avg,
     get_current_season
 )
-from team_logos import get_logo_path, get_display_name
+from team_logos import get_logo_path
+
+# Funzione per nomi italianizzati (inline per evitare problemi import)
+DISPLAY_NAMES = {
+    "bayern munich": "Bayern Monaco", "bayern munchen": "Bayern Monaco",
+    "bayern münchen": "Bayern Monaco", "fc bayern münchen": "Bayern Monaco",
+    "borussia dortmund": "Borussia Dortmund", "bvb": "Borussia Dortmund",
+    "borussia monchengladbach": "B. Mönchengladbach", "borussia m'gladbach": "B. Mönchengladbach",
+    "monchengladbach": "B. Mönchengladbach", "gladbach": "B. Mönchengladbach",
+    "eintracht frankfurt": "Eintracht Francoforte", "frankfurt": "Eintracht Francoforte",
+    "fc koln": "Colonia", "köln": "Colonia", "cologne": "Colonia", "1. fc köln": "Colonia",
+    "werder bremen": "Werder Brema", "bremen": "Werder Brema",
+    "hamburger sv": "Amburgo", "hamburg": "Amburgo",
+    "rb leipzig": "RB Lipsia", "leipzig": "RB Lipsia",
+    "vfb stuttgart": "Stoccarda", "stuttgart": "Stoccarda",
+    "sc freiburg": "Friburgo", "freiburg": "Friburgo",
+    "fc augsburg": "Augusta", "augsburg": "Augusta",
+    "1. fsv mainz 05": "Magonza", "mainz 05": "Magonza", "mainz": "Magonza",
+    "union berlin": "Union Berlino", "1. fc union berlin": "Union Berlino",
+    "hertha berlin": "Hertha Berlino", "hertha bsc": "Hertha Berlino",
+    "olympique marseille": "Olympique Marsiglia", "marseille": "Olympique Marsiglia",
+    "olympique lyon": "Olympique Lione", "lyon": "Olympique Lione",
+    "paris saint germain": "Paris Saint-Germain", "psg": "Paris Saint-Germain",
+}
+
+def get_display_name(team_name: str) -> str:
+    """Restituisce il nome italianizzato di una squadra."""
+    if not team_name:
+        return team_name
+    key = team_name.lower().strip()
+    return DISPLAY_NAMES.get(key, team_name)
 from config import API_FOOTBALL_KEY, DEFAULT_LEAGUE
 from auth import (
     init_session,
