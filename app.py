@@ -21,6 +21,25 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import base64
+import os
+
+# Funzione per caricare lo sfondo
+@st.cache_data
+def get_background_image():
+    """Carica lo sfondo e lo converte in base64."""
+    # Prova diversi percorsi possibili
+    paths = [
+        "sfondo_betengine.jpg",
+        os.path.join(os.path.dirname(__file__), "sfondo_betengine.jpg"),
+    ]
+    
+    for path in paths:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                data = f.read()
+            return base64.b64encode(data).decode()
+    
+    return None
 
 # Import moduli locali
 from probability_engine import (
@@ -111,7 +130,32 @@ if 'db_initialized' not in st.session_state:
     except Exception as e:
         st.error(f"Errore connessione database: {e}")
 
-# CSS personalizzato
+# Carica sfondo
+bg_image = get_background_image()
+
+# CSS sfondo (separato perché usa f-string)
+if bg_image:
+    st.markdown(f"""
+    <style>
+    .stApp {{
+        background-image: url("data:image/jpeg;base64,{bg_image}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+    <style>
+    .stApp {
+        background: linear-gradient(180deg, #1a3a52 0%, #0d2137 100%);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# CSS personalizzato (resto)
 st.markdown("""
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
@@ -122,11 +166,6 @@ st.markdown("""
     html, body, [data-testid="stAppViewContainer"] {
         width: 100% !important;
         overflow-x: hidden !important;
-    }
-    
-    /* Sfondo generale blu scuro */
-    .stApp {
-        background: linear-gradient(180deg, #1a3a52 0%, #0d2137 100%);
     }
     
     /* Sidebar ancora più scura */
