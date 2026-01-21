@@ -103,11 +103,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Inizializza database (dopo che Streamlit è pronto)
-try:
-    init_database()
-except Exception as e:
-    st.error(f"Errore connessione database: {e}")
+# Inizializza database SOLO UNA VOLTA (usa session_state)
+if 'db_initialized' not in st.session_state:
+    try:
+        init_database()
+        st.session_state.db_initialized = True
+    except Exception as e:
+        st.error(f"Errore connessione database: {e}")
 
 # CSS personalizzato
 st.markdown("""
@@ -1323,17 +1325,14 @@ if BACKTESTING_AVAILABLE and is_admin():
     backtesting_tab = st.sidebar.checkbox("📊 Statistiche & Backtesting", value=False)
     if backtesting_tab:
         try:
-            init_backtesting()
+            # Init backtesting SOLO UNA VOLTA
+            if 'backtesting_initialized' not in st.session_state:
+                init_backtesting()
+                st.session_state.backtesting_initialized = True
+            
             username = get_current_user()
             user_id = get_user_id(username)
             if user_id:
-                # Auto-aggiornamento risultati all'apertura
-                with st.spinner("🔄 Controllo risultati partite..."):
-                    from backtesting import update_predictions_with_results
-                    update_stats = update_predictions_with_results(API_FOOTBALL_KEY, user_id)
-                    if update_stats.get('updated', 0) > 0:
-                        st.toast(f"✅ Aggiornate {update_stats['updated']} previsioni!", icon="🔄")
-                
                 display_backtesting_dashboard(user_id, API_FOOTBALL_KEY)
             else:
                 st.error("Errore: impossibile recuperare l'ID utente")
@@ -1618,7 +1617,11 @@ if calculate_btn:
     # === SALVATAGGIO SOLO TOP PREDICTIONS (BACKTESTING) ===
     if BACKTESTING_AVAILABLE and top_predictions:
         try:
-            init_backtesting()
+            # Init già fatto in session_state, non serve ripeterlo
+            if 'backtesting_initialized' not in st.session_state:
+                init_backtesting()
+                st.session_state.backtesting_initialized = True
+            
             username = get_current_user()
             user_id = get_user_id(username)
             
