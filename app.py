@@ -56,7 +56,7 @@ from data_fetcher import (
     get_team_shots_avg,
     get_current_season
 )
-from team_logos import get_logo_path
+from team_logos import get_logo_path, get_display_name
 from config import API_FOOTBALL_KEY, DEFAULT_LEAGUE
 from auth import (
     init_session,
@@ -1492,6 +1492,10 @@ with col3:
         key="away_team"
     )
 
+# Nomi italianizzati per la visualizzazione
+home_display = get_display_name(home_team_name)
+away_display = get_display_name(away_team_name)
+
 # Input opzionale arbitro e data partita
 st.markdown("#### 📋 Dettagli Partita (opzionale)")
 col_ref1, col_ref2, col_date = st.columns([2, 1, 1])
@@ -1596,11 +1600,11 @@ if calculate_btn:
         <div class="match-header-desktop" style="display:flex; align-items:center; justify-content:center; gap:20px; padding:15px 0;">
             <div style="display:flex; align-items:center; gap:12px;">
                 {home_logo_html}
-                <span style="font-size:1.4rem; font-weight:700; color:#ffffff;">{home_team_name}</span>
+                <span style="font-size:1.4rem; font-weight:700; color:#ffffff;">{home_display}</span>
             </div>
             <span style="font-size:1.8rem; font-weight:700; color:#f39c12; margin:0 20px;">VS</span>
             <div style="display:flex; align-items:center; gap:12px;">
-                <span style="font-size:1.4rem; font-weight:700; color:#ffffff;">{away_team_name}</span>
+                <span style="font-size:1.4rem; font-weight:700; color:#ffffff;">{away_display}</span>
                 {away_logo_html}
             </div>
         </div>
@@ -1614,11 +1618,11 @@ if calculate_btn:
         <div class="match-header-mobile" style="display:none; align-items:center; justify-content:center; gap:8px; padding:10px 0; flex-wrap:nowrap;">
             <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
                 {home_logo_html_sm}
-                <span style="font-size:0.9rem; font-weight:700; color:#ffffff; white-space:nowrap;">{home_team_name}</span>
+                <span style="font-size:0.9rem; font-weight:700; color:#ffffff; white-space:nowrap;">{home_display}</span>
             </div>
             <span style="font-size:1rem; font-weight:700; color:#f39c12; margin:0 8px;">VS</span>
             <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
-                <span style="font-size:0.9rem; font-weight:700; color:#ffffff; white-space:nowrap;">{away_team_name}</span>
+                <span style="font-size:0.9rem; font-weight:700; color:#ffffff; white-space:nowrap;">{away_display}</span>
                 {away_logo_html_sm}
             </div>
         </div>
@@ -1628,7 +1632,7 @@ if calculate_btn:
                 
     except Exception as e:
         # Fallback semplice
-        st.subheader(f"🏠 {home_team_name}  VS  {away_team_name} ✈️")
+        st.subheader(f"🏠 {home_display}  VS  {away_display} ✈️")
     
     # Indicatore qualità
     st.markdown(f"""
@@ -1715,7 +1719,7 @@ if calculate_btn:
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #3498db, #2980b9); color:white; 
                     padding: clamp(10px, 3vw, 20px); border-radius:15px; text-align:center; min-height: 100px;">
-            <div style="font-size: clamp(0.7rem, 2.5vw, 0.9rem);">🏠 {home_team_name}</div>
+            <div style="font-size: clamp(0.7rem, 2.5vw, 0.9rem);">🏠 {home_display}</div>
             <div style="font-size: clamp(1.5rem, 6vw, 2.5rem); font-weight:bold;">{p_home:.1f}%</div>
             <div style="font-size: clamp(0.6rem, 2vw, 0.8rem); opacity:0.8;">Quota: {100/p_home:.2f}</div>
         </div>
@@ -1737,7 +1741,7 @@ if calculate_btn:
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #e74c3c, #c0392b); color:white; 
                     padding: clamp(10px, 3vw, 20px); border-radius:15px; text-align:center; min-height: 100px;">
-            <div style="font-size: clamp(0.7rem, 2.5vw, 0.9rem);">✈️ {away_team_name}</div>
+            <div style="font-size: clamp(0.7rem, 2.5vw, 0.9rem);">✈️ {away_display}</div>
             <div style="font-size: clamp(1.5rem, 6vw, 2.5rem); font-weight:bold;">{p_away:.1f}%</div>
             <div style="font-size: clamp(0.6rem, 2vw, 0.8rem); opacity:0.8;">Quota: {100/p_away:.2f}</div>
         </div>
@@ -1961,11 +1965,11 @@ if calculate_btn:
         with h2h_col1:
             st.metric("Partite", h2h_data["matches"])
         with h2h_col2:
-            st.metric(f"Vinte {home_team_name}", h2h_data["team1_wins"])
+            st.metric(f"Vinte {home_display}", h2h_data["team1_wins"])
         with h2h_col3:
             st.metric("Pareggi", h2h_data["draws"])
         with h2h_col4:
-            st.metric(f"Vinte {away_team_name}", h2h_data["team2_wins"])
+            st.metric(f"Vinte {away_display}", h2h_data["team2_wins"])
         
         st.write(f"**Media gol negli scontri diretti:** {h2h_data['avg_goals']}")
     else:
@@ -1981,7 +1985,7 @@ if calculate_btn:
     with shots_col1:
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #1a5f2a, #2d8a4e); padding:15px; border-radius:10px; text-align:center;">
-            <h4 style="margin:0; color:white;">{home_team_name}</h4>
+            <h4 style="margin:0; color:white;">{home_display}</h4>
             <div style="font-size:2rem; font-weight:bold; color:white;">{home_shots.get('shots_avg', 'N/A')}</div>
             <div style="font-size:0.9rem; color:#ccc;">Tiri totali/partita</div>
             <div style="font-size:1.5rem; font-weight:bold; color:#4ade80; margin-top:5px;">{home_shots.get('shots_on_target_avg', 'N/A')}</div>
@@ -1992,7 +1996,7 @@ if calculate_btn:
     with shots_col2:
         st.markdown(f"""
         <div style="background:linear-gradient(135deg, #8b1538, #c41e3a); padding:15px; border-radius:10px; text-align:center;">
-            <h4 style="margin:0; color:white;">{away_team_name}</h4>
+            <h4 style="margin:0; color:white;">{away_display}</h4>
             <div style="font-size:2rem; font-weight:bold; color:white;">{away_shots.get('shots_avg', 'N/A')}</div>
             <div style="font-size:0.9rem; color:#ccc;">Tiri totali/partita</div>
             <div style="font-size:1.5rem; font-weight:bold; color:#f87171; margin-top:5px;">{away_shots.get('shots_on_target_avg', 'N/A')}</div>
@@ -2008,10 +2012,10 @@ if calculate_btn:
     col_stats1, col_stats2 = st.columns(2)
     
     with col_stats1:
-        display_team_stats(home_stats, home_team_name, is_home=True)
+        display_team_stats(home_stats, home_display, is_home=True)
     
     with col_stats2:
-        display_team_stats(away_stats, away_team_name, is_home=False)
+        display_team_stats(away_stats, away_display, is_home=False)
     
     # === INFO LEGA ===
     with st.expander("ℹ️ Info Lega"):

@@ -512,6 +512,137 @@ def check_logos_availability(teams: list) -> Dict[str, bool]:
 
 
 # ============================================================
+# NOMI ITALIANIZZATI (Display Names)
+# ============================================================
+# Mappa nomi API -> nomi da mostrare all'utente
+# Il matching loghi usa sempre il nome API originale
+
+DISPLAY_NAMES = {
+    # Bundesliga
+    "bayern munich": "Bayern Monaco",
+    "bayern munchen": "Bayern Monaco",
+    "bayern münchen": "Bayern Monaco",
+    "fc bayern münchen": "Bayern Monaco",
+    "borussia dortmund": "Borussia Dortmund",
+    "bvb": "Borussia Dortmund",
+    "borussia monchengladbach": "B. Mönchengladbach",
+    "borussia m'gladbach": "B. Mönchengladbach",
+    "monchengladbach": "B. Mönchengladbach",
+    "gladbach": "B. Mönchengladbach",
+    "eintracht frankfurt": "Eintracht Francoforte",
+    "frankfurt": "Eintracht Francoforte",
+    "fc koln": "Colonia",
+    "köln": "Colonia",
+    "cologne": "Colonia",
+    "1. fc köln": "Colonia",
+    "werder bremen": "Werder Brema",
+    "bremen": "Werder Brema",
+    "hamburger sv": "Amburgo",
+    "hamburg": "Amburgo",
+    "rb leipzig": "RB Lipsia",
+    "leipzig": "RB Lipsia",
+    "rasenballsport leipzig": "RB Lipsia",
+    "bayer leverkusen": "Bayer Leverkusen",
+    "leverkusen": "Bayer Leverkusen",
+    "vfb stuttgart": "Stoccarda",
+    "stuttgart": "Stoccarda",
+    "vfl wolfsburg": "Wolfsburg",
+    "wolfsburg": "Wolfsburg",
+    "sc freiburg": "Friburgo",
+    "freiburg": "Friburgo",
+    "tsg hoffenheim": "Hoffenheim",
+    "hoffenheim": "Hoffenheim",
+    "fc augsburg": "Augusta",
+    "augsburg": "Augusta",
+    "1. fsv mainz 05": "Magonza",
+    "mainz 05": "Magonza",
+    "mainz": "Magonza",
+    "union berlin": "Union Berlino",
+    "1. fc union berlin": "Union Berlino",
+    "hertha berlin": "Hertha Berlino",
+    "hertha bsc": "Hertha Berlino",
+    "vfl bochum": "Bochum",
+    "bochum": "Bochum",
+    "1. fc heidenheim 1846": "Heidenheim",
+    "heidenheim": "Heidenheim",
+    "fc st. pauli": "St. Pauli",
+    "st pauli": "St. Pauli",
+    "holstein kiel": "Holstein Kiel",
+    "kiel": "Holstein Kiel",
+    "darmstadt": "Darmstadt",
+    "sv darmstadt 98": "Darmstadt",
+    
+    # Premier League (alcune città)
+    "manchester city": "Manchester City",
+    "manchester united": "Manchester United",
+    "newcastle": "Newcastle",
+    "newcastle united": "Newcastle",
+    
+    # Ligue 1
+    "paris saint germain": "Paris Saint-Germain",
+    "paris saint-germain": "Paris Saint-Germain",
+    "psg": "Paris Saint-Germain",
+    "olympique marseille": "Olympique Marsiglia",
+    "marseille": "Olympique Marsiglia",
+    "olympique lyon": "Olympique Lione",
+    "lyon": "Olympique Lione",
+    "as monaco": "Monaco",
+    "monaco": "Monaco",
+    
+    # La Liga
+    "atletico madrid": "Atletico Madrid",
+    "atlético madrid": "Atletico Madrid",
+    "athletic bilbao": "Athletic Bilbao",
+    "athletic club": "Athletic Bilbao",
+}
+
+
+def get_display_name(team_name: str) -> str:
+    """
+    Restituisce il nome italianizzato di una squadra.
+    Se non c'è traduzione, restituisce il nome originale.
+    
+    Args:
+        team_name: Nome squadra come arriva dall'API
+    
+    Returns:
+        Nome da mostrare all'utente
+    """
+    if not team_name:
+        return team_name
+    
+    # Cerca nel dizionario (case-insensitive)
+    key = team_name.lower().strip()
+    
+    if key in DISPLAY_NAMES:
+        return DISPLAY_NAMES[key]
+    
+    # Se non trovato, restituisce l'originale
+    return team_name
+
+
+def get_api_name(display_name: str) -> str:
+    """
+    Dato un nome display, trova il nome API originale.
+    Utile per il reverse lookup.
+    
+    Args:
+        display_name: Nome italianizzato
+    
+    Returns:
+        Nome API originale (o lo stesso se non trovato)
+    """
+    # Crea reverse mapping
+    reverse_map = {v.lower(): k for k, v in DISPLAY_NAMES.items()}
+    
+    key = display_name.lower().strip()
+    if key in reverse_map:
+        return reverse_map[key]
+    
+    return display_name
+
+
+# ============================================================
 # TEST
 # ============================================================
 
