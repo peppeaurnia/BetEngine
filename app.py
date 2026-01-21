@@ -1318,8 +1318,8 @@ if is_admin():
         st.markdown("---")
         st.stop()  # Non mostrare l'app principale quando si è nel pannello admin
 
-# Pannello Backtesting - per tutti gli utenti
-if BACKTESTING_AVAILABLE:
+# Pannello Backtesting - SOLO PER ADMIN
+if BACKTESTING_AVAILABLE and is_admin():
     backtesting_tab = st.sidebar.checkbox("📊 Statistiche & Backtesting", value=False)
     if backtesting_tab:
         try:
@@ -1327,6 +1327,13 @@ if BACKTESTING_AVAILABLE:
             username = get_current_user()
             user_id = get_user_id(username)
             if user_id:
+                # Auto-aggiornamento risultati all'apertura
+                with st.spinner("🔄 Controllo risultati partite..."):
+                    from backtesting import update_predictions_with_results
+                    update_stats = update_predictions_with_results(API_FOOTBALL_KEY, user_id)
+                    if update_stats.get('updated', 0) > 0:
+                        st.toast(f"✅ Aggiornate {update_stats['updated']} previsioni!", icon="🔄")
+                
                 display_backtesting_dashboard(user_id, API_FOOTBALL_KEY)
             else:
                 st.error("Errore: impossibile recuperare l'ID utente")
