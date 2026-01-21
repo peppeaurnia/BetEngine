@@ -448,17 +448,19 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
                                    home_shots: Dict = None,
                                    away_shots: Dict = None,
                                    referee_name: str = None,
-                                   league_name: str = None) -> Dict:
+                                   league_name: str = None,
+                                   injuries_data: Dict = None) -> Dict:
     """
     Calcola tutte le probabilità per un match.
     
     Questa è la funzione principale che orchestra tutti i calcoli:
     1. Calcola μ per entrambe le squadre
     2. Applica aggiustamenti H2H e tiri
-    3. Calcola λ₃ per la correlazione
-    4. Costruisce la matrice Poisson bivariata
-    5. Estrae tutte le probabilità
-    6. Calcola probabilità cartellini con aggiustamento arbitro
+    3. Applica aggiustamento INFORTUNI (nuovo!)
+    4. Calcola λ₃ per la correlazione
+    5. Costruisce la matrice Poisson bivariata
+    6. Estrae tutte le probabilità
+    7. Calcola probabilità cartellini con aggiustamento arbitro
     
     Args:
         home_stats: Dict con statistiche squadra casa
@@ -469,6 +471,7 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         away_shots: Dict con media tiri squadra trasferta
         referee_name: Nome dell'arbitro (opzionale)
         league_name: Nome della lega per aggiustamento arbitro specifico
+        injuries_data: Dict con dati infortuni (da get_injury_adjustment)
     
     Returns:
         Dict completo con tutte le probabilità e metriche
@@ -486,6 +489,15 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
     shots_adj_away = calculate_shots_adjustment(away_shots)
     mu_home *= shots_adj_home
     mu_away *= shots_adj_away
+    
+    # 4. Applica aggiustamento INFORTUNI (NUOVO!)
+    injuries_adj_home = 1.0
+    injuries_adj_away = 1.0
+    if injuries_data:
+        injuries_adj_home = injuries_data.get("mu_home_adj", 1.0)
+        injuries_adj_away = injuries_data.get("mu_away_adj", 1.0)
+        mu_home *= injuries_adj_home
+        mu_away *= injuries_adj_away
     
     # Ri-applica clamping dopo aggiustamenti
     mu_home = clamp_lambda(mu_home)
@@ -544,6 +556,8 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         "h2h_adj_away": round(h2h_adj_away, 3),
         "shots_adj_home": round(shots_adj_home, 3),
         "shots_adj_away": round(shots_adj_away, 3),
+        "injuries_adj_home": round(injuries_adj_home, 3),
+        "injuries_adj_away": round(injuries_adj_away, 3),
         
         # 1X2
         **probs_1x2,
@@ -561,7 +575,10 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         "exact_scores": exact_scores,
         
         # Matrice (per visualizzazione avanzata)
-        "matrix": M
+        "matrix": M,
+        
+        # Infortuni (NUOVO!)
+        "injuries_data": injuries_data if injuries_data else None
     }
 
 
