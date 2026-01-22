@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 import requests
 import streamlit as st
+import traceback
 
 # Import configurazione database
 from database import get_connection
@@ -306,57 +307,76 @@ def determine_prediction_outcome(
     Returns:
         (is_won: bool, actual_result: str)
     """
-    total_goals = home_goals + away_goals
-    
-    # === 1X2 ===
-    if market == '1X2':
-        if home_goals > away_goals:
-            actual = '1'
-        elif home_goals < away_goals:
-            actual = '2'
-        else:
-            actual = 'X'
+    try:
+        total_goals = home_goals + away_goals
         
-        return (selection == actual, actual)
-    
-    # === BTTS ===
-    elif market == 'BTTS':
-        both_scored = home_goals > 0 and away_goals > 0
-        actual = 'GG' if both_scored else 'NG'
-        return (selection == actual, actual)
-    
-    # === Over/Under ===
-    elif market == 'Over/Under':
-        # Estrai la linea dalla selezione (es. "Over 2.5" -> 2.5)
-        parts = selection.split()
-        line = float(parts[1])
-        is_over = parts[0] == 'Over'
+        # === 1X2 ===
+        if market == '1X2':
+            if home_goals > away_goals:
+                actual = '1'
+            elif home_goals < away_goals:
+                actual = '2'
+            else:
+                actual = 'X'
+            
+            return (selection == actual, actual)
         
-        if is_over:
-            won = total_goals > line
-            actual = f"Over {line}" if total_goals > line else f"Under {line}"
-        else:
-            won = total_goals < line
-            actual = f"Under {line}" if total_goals < line else f"Over {line}"
+        # === BTTS ===
+        elif market == 'BTTS':
+            both_scored = home_goals > 0 and away_goals > 0
+            actual = 'GG' if both_scored else 'NG'
+            return (selection == actual, actual)
         
-        return (won, actual)
+        # === Over/Under ===
+        elif market == 'Over/Under' or 'Over' in str(selection) or 'Under' in str(selection):
+            # Estrai la linea dalla selezione (es. "Over 2.5" -> 2.5)
+            parts = str(selection).split()
+            if len(parts) < 2:
+                return (None, None)
+            
+            try:
+                line = float(parts[1])
+            except (ValueError, IndexError):
+                return (None, None)
+                
+            is_over = parts[0].lower() == 'over'
+            
+            if is_over:
+                won = total_goals > line
+                actual = f"Over {line}" if total_goals > line else f"Under {line}"
+            else:
+                won = total_goals < line
+                actual = f"Under {line}" if total_goals < line else f"Over {line}"
+            
+            return (won, actual)
+        
+        # === Cards ===
+        elif market == 'Cards' and total_cards is not None:
+            parts = str(selection).split()
+            if len(parts) < 3:
+                return (None, None)
+            
+            try:
+                line = float(parts[2])  # "Cards Over 3.5" -> 3.5
+            except (ValueError, IndexError):
+                return (None, None)
+                
+            is_over = parts[1].lower() == 'over'
+            
+            if is_over:
+                won = total_cards > line
+                actual = f"Cards Over {line}" if total_cards > line else f"Cards Under {line}"
+            else:
+                won = total_cards < line
+                actual = f"Cards Under {line}" if total_cards < line else f"Cards Over {line}"
+            
+            return (won, actual)
+        
+        return (None, None)
     
-    # === Cards ===
-    elif market == 'Cards' and total_cards is not None:
-        parts = selection.split()
-        line = float(parts[2])  # "Cards Over 3.5" -> 3.5
-        is_over = parts[1] == 'Over'
-        
-        if is_over:
-            won = total_cards > line
-            actual = f"Cards Over {line}" if total_cards > line else f"Cards Under {line}"
-        else:
-            won = total_cards < line
-            actual = f"Cards Under {line}" if total_cards < line else f"Cards Over {line}"
-        
-        return (won, actual)
-    
-    return (None, None)
+    except Exception as e:
+        # In caso di qualsiasi errore, ritorna None
+        return (None, None)
 
 
 def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
@@ -711,27 +731,44 @@ def delete_all_predictions(user_id: int) -> int:
 def display_backtesting_dashboard(user_id: int, api_key: str):
     """Mostra la dashboard completa di backtesting."""
     
-    st.header("📊 Backtesting & Statistiche")
+    try:
+        st.header("📊 Backtesting & Statistiche")
+        
+        # Tabs
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📈 Statistiche", 
+            "📋 Storico", 
+            "🔄 Aggiorna",
+            "🗑️ Gestione"
+        ])
+        
+        with tab1:
+            try:
+                display_statistics_tab(user_id)
+            except Exception as e:
+                st.error(f"Errore Statistiche: {e}")
+        
+        with tab2:
+            try:
+                display_history_tab(user_id)
+            except Exception as e:
+                st.error(f"Errore Storico: {e}")
+        
+        with tab3:
+            try:
+                display_update_tab(user_id, api_key)
+            except Exception as e:
+                st.error(f"Errore Aggiorna: {e}")
+        
+        with tab4:
+            try:
+                display_manage_tab(user_id)
+            except Exception as e:
+                st.error(f"Errore Gestione: {e}")
     
-    # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📈 Statistiche", 
-        "📋 Storico", 
-        "🔄 Aggiorna",
-        "🗑️ Gestione"
-    ])
-    
-    with tab1:
-        display_statistics_tab(user_id)
-    
-    with tab2:
-        display_history_tab(user_id)
-    
-    with tab3:
-        display_update_tab(user_id, api_key)
-    
-    with tab4:
-        display_manage_tab(user_id)
+    except Exception as e:
+        st.error(f"Errore backtesting: {e}")
+        st.code(traceback.format_exc())
 
 
 def display_statistics_tab(user_id: int):
@@ -964,63 +1001,68 @@ def display_update_tab(user_id: int, api_key: str):
     cursor.close()
     conn.close()
     
-    if pending_for_manual:
+    if pending_for_manual and len(pending_for_manual) > 0:
         # Dropdown per selezionare partita
         match_options = {f"{m['home_team']} vs {m['away_team']} ({m['match_date']})": m for m in pending_for_manual}
         
-        selected_match_key = st.selectbox(
-            "Seleziona partita da aggiornare:",
-            options=list(match_options.keys())
-        )
-        
-        if selected_match_key:
-            selected_match = match_options[selected_match_key]
+        options_list = list(match_options.keys())
+        if not options_list:
+            st.info("Nessuna partita disponibile per aggiornamento manuale.")
+        else:
+            selected_match_key = st.selectbox(
+                "Seleziona partita da aggiornare:",
+                options=options_list,
+                index=0
+            )
             
-            col1, col2 = st.columns(2)
-            with col1:
-                home_goals = st.number_input(f"Gol {selected_match['home_team']}", min_value=0, max_value=15, value=0)
-            with col2:
-                away_goals = st.number_input(f"Gol {selected_match['away_team']}", min_value=0, max_value=15, value=0)
-            
-            if st.button("💾 Salva Risultato Manuale", type="secondary"):
-                # Aggiorna tutte le previsioni per questa partita
-                conn = get_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
+            if selected_match_key and selected_match_key in match_options:
+                selected_match = match_options[selected_match_key]
                 
-                cursor.execute("""
-                    SELECT id, market, selection FROM predictions
-                    WHERE match_id = %s AND user_id = %s AND is_won IS NULL
-                """, (selected_match['match_id'], user_id))
+                col1, col2 = st.columns(2)
+                with col1:
+                    home_goals = st.number_input(f"Gol {selected_match['home_team']}", min_value=0, max_value=15, value=0)
+                with col2:
+                    away_goals = st.number_input(f"Gol {selected_match['away_team']}", min_value=0, max_value=15, value=0)
                 
-                predictions = cursor.fetchall()
-                updated = 0
-                
-                for pred in predictions:
-                    is_won, actual_result = determine_prediction_outcome(
-                        pred["market"],
-                        pred["selection"],
-                        home_goals,
-                        away_goals
-                    )
+                if st.button("💾 Salva Risultato Manuale", type="secondary"):
+                    # Aggiorna tutte le previsioni per questa partita
+                    conn = get_connection()
+                    cursor = conn.cursor(cursor_factory=RealDictCursor)
                     
-                    if is_won is not None:
-                        cursor.execute("""
-                            UPDATE predictions SET
-                                home_goals = %s,
-                                away_goals = %s,
-                                actual_result = %s,
-                                is_won = %s,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE id = %s
-                        """, (home_goals, away_goals, actual_result, int(is_won), pred["id"]))
-                        updated += 1
-                
-                conn.commit()
-                cursor.close()
-                conn.close()
-                
-                st.success(f"✅ Aggiornate {updated} previsioni con risultato {home_goals}-{away_goals}!")
-                st.rerun()
+                    cursor.execute("""
+                        SELECT id, market, selection FROM predictions
+                        WHERE match_id = %s AND user_id = %s AND is_won IS NULL
+                    """, (selected_match['match_id'], user_id))
+                    
+                    predictions = cursor.fetchall()
+                    updated = 0
+                    
+                    for pred in predictions:
+                        is_won, actual_result = determine_prediction_outcome(
+                            pred["market"],
+                            pred["selection"],
+                            home_goals,
+                            away_goals
+                        )
+                        
+                        if is_won is not None:
+                            cursor.execute("""
+                                UPDATE predictions SET
+                                    home_goals = %s,
+                                    away_goals = %s,
+                                    actual_result = %s,
+                                    is_won = %s,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = %s
+                            """, (home_goals, away_goals, actual_result, int(is_won), pred["id"]))
+                            updated += 1
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    
+                    st.success(f"✅ Aggiornate {updated} previsioni con risultato {home_goals}-{away_goals}!")
+                    st.rerun()
     else:
         st.info("Nessuna partita da aggiornare manualmente.")
     
