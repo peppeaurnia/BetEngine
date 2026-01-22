@@ -265,6 +265,13 @@ def get_match_result_from_api(api_key: str, match_id: int) -> Optional[Dict]:
         response = requests.get(url, headers=headers, timeout=10)
         data = response.json()
         
+        # Debug: salva info errore
+        if data.get("errors"):
+            return {"error": str(data["errors"]), "not_finished": False}
+        
+        if not data.get("response") or len(data["response"]) == 0:
+            return {"error": f"Nessun risultato per match_id {match_id}", "not_finished": False}
+        
         if data.get("response"):
             fixture = data["response"][0]
             status = fixture["fixture"]["status"]["short"]
@@ -283,8 +290,7 @@ def get_match_result_from_api(api_key: str, match_id: int) -> Optional[Dict]:
         
         return None
     except Exception as e:
-        print(f"Errore recupero risultato match {match_id}: {e}")
-        return None
+        return {"error": str(e), "not_finished": False}
 
 
 def determine_prediction_outcome(
@@ -394,12 +400,18 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
         
         if not result:
             stats["errors"] += 1
-            stats["debug_matches"].append(f"❌ {match['home_team']} vs {match['away_team']} - Errore API")
+            stats["debug_matches"].append(f"❌ {match['home_team']} vs {match['away_team']} (ID:{match_id}) - Nessuna risposta API")
+            continue
+        
+        # Gestisci errore specifico
+        if result.get("error"):
+            stats["errors"] += 1
+            stats["debug_matches"].append(f"❌ {match['home_team']} vs {match['away_team']} (ID:{match_id}) - {result['error']}")
             continue
         
         if result.get("not_finished"):
             stats["not_finished"] += 1
-            stats["debug_matches"].append(f"⏳ {match['home_team']} vs {match['away_team']} - Status: {result.get('status', 'N/A')}")
+            stats["debug_matches"].append(f"⏳ {match['home_team']} vs {match['away_team']} (ID:{match_id}) - Status: {result.get('status', 'N/A')}")
             continue
         
         home_goals = result["home_goals"]
