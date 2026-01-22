@@ -364,11 +364,12 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     # Trova previsioni senza risultato per partite passate
+    # Usa <= CURRENT_DATE per includere anche partite di oggi che potrebbero essere finite
     query = """
         SELECT DISTINCT match_id, match_date, home_team, away_team
         FROM predictions 
         WHERE is_won IS NULL 
-        AND match_date < CURRENT_DATE
+        AND match_date <= CURRENT_DATE
     """
     if user_id:
         query += f" AND user_id = {user_id}"
@@ -380,7 +381,8 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
         "checked": 0,
         "updated": 0,
         "not_finished": 0,
-        "errors": 0
+        "errors": 0,
+        "debug_matches": []  # Per debug
     }
     
     for match in pending_matches:
@@ -392,10 +394,12 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
         
         if not result:
             stats["errors"] += 1
+            stats["debug_matches"].append(f"❌ {match['home_team']} vs {match['away_team']} - Errore API")
             continue
         
         if result.get("not_finished"):
             stats["not_finished"] += 1
+            stats["debug_matches"].append(f"⏳ {match['home_team']} vs {match['away_team']} - Status: {result.get('status', 'N/A')}")
             continue
         
         home_goals = result["home_goals"]
@@ -429,6 +433,9 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
                 """, (home_goals, away_goals, actual_result, int(is_won), pred["id"]))
                 
                 stats["updated"] += 1
+        
+        if predictions:
+            stats["debug_matches"].append(f"✅ {match['home_team']} vs {match['away_team']} - {home_goals}-{away_goals}")
     
     conn.commit()
     cursor.close()
@@ -907,25 +914,37 @@ def display_update_tab(user_id: int, api_key: str):
         - Partite controllate: **{stats['checked']}**
         - Previsioni aggiornate: **{stats['updated']}**
         - Non ancora concluse: {stats['not_finished']}
+        - Errori API: {stats['errors']}
         """)
+        
+        # Mostra debug
+        if stats.get('debug_matches'):
+            with st.expander("🔍 Dettaglio partite"):
+                for msg in stats['debug_matches']:
+                    st.write(msg)
         
         if stats['updated'] > 0:
             st.balloons()
     
     st.markdown("---")
     
-    # Mostra previsioni in attesa
+    # DEBUG: Mostra previsioni pendenti
     st.markdown("### ⏳ Partite da Aggiornare")
     
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
+    # DEBUG: Mostra data corrente del database
+    cursor.execute("SELECT CURRENT_DATE as today, CURRENT_TIMESTAMP as now")
+    db_time = cursor.fetchone()
+    st.caption(f"🕐 Data DB: {db_time['today']} | Ora: {db_time['now']}")
+    
     cursor.execute("""
-        SELECT DISTINCT match_date, home_team, away_team, league_name
+        SELECT DISTINCT match_id, match_date, home_team, away_team, league_name
         FROM predictions
-        WHERE user_id = %s AND is_won IS NULL AND match_date < CURRENT_DATE
+        WHERE user_id = %s AND is_won IS NULL
         ORDER BY match_date DESC
-        LIMIT 10
+        LIMIT 15
     """, (user_id,))
     
     pending = cursor.fetchall()
@@ -933,14 +952,16 @@ def display_update_tab(user_id: int, api_key: str):
     conn.close()
     
     if pending:
+        st.markdown(f"**Trovate {len(pending)} partite senza risultato:**")
         for match in pending:
-            date_str = match['match_date'].strftime("%d/%m") if match['match_date'] else "N/A"
+            date_str = match['match_date'].strftime("%d/%m/%Y") if match['match_date'] else "N/A"
+            is_past = match['match_date'] < db_time['today'] if match['match_date'] else False
+            status_icon = "✅" if is_past else "⏳"
             st.markdown(f"""
             <div style="background:rgba(243, 156, 18, 0.2); border-left:4px solid #f39c12; 
                         padding:10px; border-radius:8px; margin-bottom:8px;">
-                <span style="color:#ffffff;"><strong>📅 {date_str}</strong></span>
-                <span style="color:#a8d4f0;"> {match['home_team']} vs {match['away_team']}</span>
-                <span style="color:#7fb3d3; font-size:0.9em;"> ({match['league_name']})</span>
+                <span style="color:#ffffff;">{status_icon} <strong>{match['home_team']} vs {match['away_team']}</strong></span><br>
+                <span style="color:#a8d4f0;">📅 {date_str} | 🏆 {match['league_name']} | ID: {match['match_id']}</span>
             </div>
             """, unsafe_allow_html=True)
     else:
