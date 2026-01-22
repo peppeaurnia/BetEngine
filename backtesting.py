@@ -328,18 +328,34 @@ def determine_prediction_outcome(
             return (selection == actual, actual)
         
         # === Over/Under ===
-        elif market == 'Over/Under' or 'Over' in str(selection) or 'Under' in str(selection):
-            # Estrai la linea dalla selezione (es. "Over 2.5" -> 2.5)
-            parts = str(selection).split()
-            if len(parts) < 2:
-                return (None, None)
+        elif market == 'Over/Under' or 'Over' in str(selection) or 'Under' in str(selection) or str(selection).startswith('O') or str(selection).startswith('U'):
+            selection_str = str(selection).strip()
             
-            try:
-                line = float(parts[1])
-            except (ValueError, IndexError):
-                return (None, None)
+            # Gestisci formato abbreviato: "O2.5" o "U2.5"
+            if selection_str.startswith('O') and selection_str[1:2].isdigit():
+                is_over = True
+                try:
+                    line = float(selection_str[1:])
+                except ValueError:
+                    return (None, None)
+            elif selection_str.startswith('U') and selection_str[1:2].isdigit():
+                is_over = False
+                try:
+                    line = float(selection_str[1:])
+                except ValueError:
+                    return (None, None)
+            else:
+                # Formato standard: "Over 2.5" o "Under 2.5"
+                parts = selection_str.split()
+                if len(parts) < 2:
+                    return (None, None)
                 
-            is_over = parts[0].lower() == 'over'
+                try:
+                    line = float(parts[1])
+                except (ValueError, IndexError):
+                    return (None, None)
+                    
+                is_over = parts[0].lower() == 'over'
             
             if is_over:
                 won = total_goals > line
