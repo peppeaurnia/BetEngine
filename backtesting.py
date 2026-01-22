@@ -940,6 +940,92 @@ def display_update_tab(user_id: int, api_key: str):
     
     st.markdown("---")
     
+    # === AGGIORNAMENTO MANUALE ===
+    st.markdown("### ✏️ Aggiornamento Manuale")
+    st.markdown("""
+    <p style="color:#f39c12;">
+    Per partite rinviate o con errori API, inserisci il risultato manualmente.
+    </p>
+    """, unsafe_allow_html=True)
+    
+    # Carica partite con errori
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cursor.execute("""
+        SELECT DISTINCT match_id, match_date, home_team, away_team, league_name
+        FROM predictions
+        WHERE user_id = %s AND is_won IS NULL AND match_date <= CURRENT_DATE
+        ORDER BY match_date DESC
+        LIMIT 20
+    """, (user_id,))
+    
+    pending_for_manual = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    if pending_for_manual:
+        # Dropdown per selezionare partita
+        match_options = {f"{m['home_team']} vs {m['away_team']} ({m['match_date']})": m for m in pending_for_manual}
+        
+        selected_match_key = st.selectbox(
+            "Seleziona partita da aggiornare:",
+            options=list(match_options.keys())
+        )
+        
+        if selected_match_key:
+            selected_match = match_options[selected_match_key]
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                home_goals = st.number_input(f"Gol {selected_match['home_team']}", min_value=0, max_value=15, value=0)
+            with col2:
+                away_goals = st.number_input(f"Gol {selected_match['away_team']}", min_value=0, max_value=15, value=0)
+            
+            if st.button("💾 Salva Risultato Manuale", type="secondary"):
+                # Aggiorna tutte le previsioni per questa partita
+                conn = get_connection()
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+                
+                cursor.execute("""
+                    SELECT id, market, selection FROM predictions
+                    WHERE match_id = %s AND user_id = %s AND is_won IS NULL
+                """, (selected_match['match_id'], user_id))
+                
+                predictions = cursor.fetchall()
+                updated = 0
+                
+                for pred in predictions:
+                    is_won, actual_result = determine_prediction_outcome(
+                        pred["market"],
+                        pred["selection"],
+                        home_goals,
+                        away_goals
+                    )
+                    
+                    if is_won is not None:
+                        cursor.execute("""
+                            UPDATE predictions SET
+                                home_goals = %s,
+                                away_goals = %s,
+                                actual_result = %s,
+                                is_won = %s,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                        """, (home_goals, away_goals, actual_result, int(is_won), pred["id"]))
+                        updated += 1
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+                st.success(f"✅ Aggiornate {updated} previsioni con risultato {home_goals}-{away_goals}!")
+                st.rerun()
+    else:
+        st.info("Nessuna partita da aggiornare manualmente.")
+    
+    st.markdown("---")
+    
     # DEBUG: Mostra previsioni pendenti
     st.markdown("### ⏳ Partite da Aggiornare")
     
