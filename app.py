@@ -1797,6 +1797,10 @@ if calculate_btn:
                         market = 'Altro'
                     
                     try:
+                        # Converti a float Python nativo (non numpy)
+                        prob_value = float(pred['prob'] / 100)
+                        stars_value = int(pred.get('stars', 3))
+                        
                         result = save_prediction(
                             user_id=user_id,
                             match_id=match_id,
@@ -1807,8 +1811,8 @@ if calculate_btn:
                             away_team=away_team_name,
                             market=market,
                             selection=short,
-                            predicted_prob=pred['prob'] / 100,
-                            confidence_stars=pred.get('stars', 3)
+                            predicted_prob=prob_value,
+                            confidence_stars=stars_value
                         )
                         
                         if result:
