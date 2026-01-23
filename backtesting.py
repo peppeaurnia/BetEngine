@@ -152,7 +152,8 @@ def save_prediction(
         return True
     except Exception as e:
         conn.rollback()
-        print(f"Errore salvataggio previsione: {e}")
+        # Log dettagliato per debug
+        st.error(f"❌ DB Error [{market}:{selection}]: {e}")
         return False
     finally:
         cursor.close()

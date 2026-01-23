@@ -1382,7 +1382,7 @@ def calculate_top_predictions(probabilities: dict, home_team: str, away_team: st
 
 
 def display_top_predictions(predictions: list) -> None:
-    """Visualizza i top 3 pronostici consigliati - responsive per mobile."""
+    """Visualizza i top 3 pronostici consigliati."""
     
     st.subheader("🏆 Pronostici Consigliati")
     
@@ -1393,61 +1393,45 @@ def display_top_predictions(predictions: list) -> None:
     medals = ['🥇', '🥈', '🥉']
     colors = ['#FFD700', '#C0C0C0', '#CD7F32']  # Oro, Argento, Bronzo
     
-    # CSS inline per garantire visibilità su tutti i dispositivi
-    st.markdown("""
-    <style>
-    .top-predictions-grid {
-        display: grid !important;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-        width: 100%;
-        margin-bottom: 20px;
-    }
-    @media (max-width: 768px) {
-        .top-predictions-grid {
-            grid-template-columns: 1fr !important;
-        }
-    }
-    .pred-card {
-        border-radius: 15px;
-        padding: 15px;
-        text-align: center;
-        min-height: 140px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    # Mostra quanti pronostici abbiamo
+    num_preds = min(len(predictions), 3)
     
-    # Genera HTML per tutte le card
-    cards_html = ""
-    for i, pred in enumerate(predictions[:3]):
-        stars = '⭐' * pred['stars'] + '☆' * (5 - pred['stars'])
-        confidence_text = "Molto Alta" if pred['stars'] >= 5 else "Alta" if pred['stars'] >= 4 else "Media-Alta" if pred['stars'] >= 3 else "Media"
-        
-        cards_html += f"""
-        <div class="pred-card" style="background: linear-gradient(135deg, {colors[i]}22, {colors[i]}44); 
-                    border: 2px solid {colors[i]};">
-            <div style="font-size: 1.8rem;">{medals[i]}</div>
-            <div style="font-size: 0.95rem; font-weight: bold; color: #e8f4fc; margin: 8px 0;">
-                {pred['icon']} {pred['name']}
-            </div>
-            <div style="font-size: 1.6rem; font-weight: bold; color: #4fc3f7;">
-                {pred['prob']:.1f}%
-            </div>
-            <div style="font-size: 0.85rem; color: #ffd700; margin: 4px 0;">
-                {stars}
-            </div>
-            <div style="font-size: 0.7rem; color: #a8d4f0;">
-                {confidence_text}
-            </div>
-        </div>
-        """
+    # Usa st.columns nativo - funziona sempre
+    if num_preds == 1:
+        cols = [st.columns([1, 2, 1])[1]]  # Centra singola card
+    elif num_preds == 2:
+        cols = st.columns(2)
+    else:
+        cols = st.columns(3)
     
-    # Container con grid
-    st.markdown(f"""
-    <div class="top-predictions-grid">
-        {cards_html}
-    </div>
-    """, unsafe_allow_html=True)
+    for i in range(num_preds):
+        pred = predictions[i]
+        with cols[i]:
+            stars = '⭐' * pred['stars'] + '☆' * (5 - pred['stars'])
+            confidence_text = "Molto Alta" if pred['stars'] >= 5 else "Alta" if pred['stars'] >= 4 else "Media-Alta" if pred['stars'] >= 3 else "Media"
+            
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, {colors[i]}22, {colors[i]}44); 
+                        border: 2px solid {colors[i]}; 
+                        border-radius: 15px; 
+                        padding: 15px; 
+                        text-align: center;
+                        min-height: 150px;">
+                <div style="font-size: 1.8rem;">{medals[i]}</div>
+                <div style="font-size: 0.9rem; font-weight: bold; color: #e8f4fc; margin: 8px 0;">
+                    {pred['icon']} {pred['name']}
+                </div>
+                <div style="font-size: 1.5rem; font-weight: bold; color: #4fc3f7;">
+                    {pred['prob']:.1f}%
+                </div>
+                <div style="font-size: 0.8rem; color: #ffd700; margin: 4px 0;">
+                    {stars}
+                </div>
+                <div style="font-size: 0.7rem; color: #a8d4f0;">
+                    {confidence_text}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # ============================================================
@@ -1776,6 +1760,9 @@ if calculate_btn:
     # === SALVATAGGIO SOLO TOP PREDICTIONS (BACKTESTING) ===
     if BACKTESTING_AVAILABLE and top_predictions:
         try:
+            # Debug: mostra quanti pronostici stiamo salvando
+            st.caption(f"🔍 Debug: {len(top_predictions)} pronostici da salvare")
+            
             # Init già fatto in session_state, non serve ripeterlo
             if 'backtesting_initialized' not in st.session_state:
                 init_backtesting()
@@ -1791,45 +1778,52 @@ if calculate_btn:
                 
                 saved_count = 0
                 saved_details = []  # Debug
+                failed_details = []  # Debug errori
                 
-                for pred in top_predictions:
+                for idx, pred in enumerate(top_predictions):
                     # Determina il mercato
                     short = pred['short']
                     if short in ['1', 'X', '2']:
                         market = '1X2'
                     elif short in ['GG', 'NG']:
                         market = 'BTTS'
+                    elif short.startswith('CO') or short.startswith('CU'):
+                        market = 'Cards'
                     elif short.startswith('O') or short.startswith('U'):
-                        # Escludi le carte che iniziano con CO o CU
-                        if short.startswith('CO') or short.startswith('CU'):
-                            market = 'Cards'
-                        else:
-                            market = 'Over/Under'
+                        market = 'Over/Under'
                     elif short.startswith('C'):
                         market = 'Cards'
                     else:
                         market = 'Altro'
                     
-                    result = save_prediction(
-                        user_id=user_id,
-                        match_id=match_id,
-                        match_date=match_date.strftime('%Y-%m-%d'),
-                        league_id=selected_league_id,
-                        league_name=selected_league_name,
-                        home_team=home_team_name,
-                        away_team=away_team_name,
-                        market=market,
-                        selection=short,
-                        predicted_prob=pred['prob'] / 100,  # Converti in decimale
-                        confidence_stars=pred.get('stars', 3)
-                    )
-                    
-                    if result:
-                        saved_count += 1
-                        saved_details.append(f"{market}: {short}")
+                    try:
+                        result = save_prediction(
+                            user_id=user_id,
+                            match_id=match_id,
+                            match_date=match_date.strftime('%Y-%m-%d'),
+                            league_id=selected_league_id,
+                            league_name=selected_league_name,
+                            home_team=home_team_name,
+                            away_team=away_team_name,
+                            market=market,
+                            selection=short,
+                            predicted_prob=pred['prob'] / 100,
+                            confidence_stars=pred.get('stars', 3)
+                        )
+                        
+                        if result:
+                            saved_count += 1
+                            saved_details.append(f"{market}: {short}")
+                        else:
+                            failed_details.append(f"{market}: {short} (save returned False)")
+                    except Exception as save_err:
+                        failed_details.append(f"{market}: {short} (Error: {save_err})")
                 
                 if saved_count > 0:
-                    st.toast(f"💾 {saved_count} pronostici salvati: {', '.join(saved_details)}", icon="✅")
+                    st.toast(f"💾 {saved_count}/{len(top_predictions)} salvati: {', '.join(saved_details)}", icon="✅")
+                
+                if failed_details:
+                    st.warning(f"⚠️ Non salvati: {', '.join(failed_details)}")
         except Exception as e:
             st.error(f"Errore salvataggio backtesting: {e}")
     
