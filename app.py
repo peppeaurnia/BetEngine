@@ -1393,6 +1393,30 @@ def display_top_predictions(predictions: list) -> None:
     medals = ['🥇', '🥈', '🥉']
     colors = ['#FFD700', '#C0C0C0', '#CD7F32']  # Oro, Argento, Bronzo
     
+    # CSS inline per garantire visibilità su tutti i dispositivi
+    st.markdown("""
+    <style>
+    .top-predictions-grid {
+        display: grid !important;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        width: 100%;
+        margin-bottom: 20px;
+    }
+    @media (max-width: 768px) {
+        .top-predictions-grid {
+            grid-template-columns: 1fr !important;
+        }
+    }
+    .pred-card {
+        border-radius: 15px;
+        padding: 15px;
+        text-align: center;
+        min-height: 140px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     # Genera HTML per tutte le card
     cards_html = ""
     for i, pred in enumerate(predictions[:3]):
@@ -1400,14 +1424,8 @@ def display_top_predictions(predictions: list) -> None:
         confidence_text = "Molto Alta" if pred['stars'] >= 5 else "Alta" if pred['stars'] >= 4 else "Media-Alta" if pred['stars'] >= 3 else "Media"
         
         cards_html += f"""
-        <div class="prediction-card" style="background: linear-gradient(135deg, {colors[i]}22, {colors[i]}44); 
-                    border: 2px solid {colors[i]}; 
-                    border-radius: 15px; 
-                    padding: 15px; 
-                    text-align: center;
-                    min-height: 160px;
-                    flex: 1;
-                    min-width: 100px;">
+        <div class="pred-card" style="background: linear-gradient(135deg, {colors[i]}22, {colors[i]}44); 
+                    border: 2px solid {colors[i]};">
             <div style="font-size: 1.8rem;">{medals[i]}</div>
             <div style="font-size: 0.95rem; font-weight: bold; color: #e8f4fc; margin: 8px 0;">
                 {pred['icon']} {pred['name']}
@@ -1424,26 +1442,9 @@ def display_top_predictions(predictions: list) -> None:
         </div>
         """
     
-    # Container responsive con flexbox
+    # Container con grid
     st.markdown(f"""
-    <style>
-    .predictions-container {{
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        justify-content: center;
-    }}
-    @media (max-width: 768px) {{
-        .predictions-container {{
-            flex-direction: column;
-        }}
-        .prediction-card {{
-            min-width: 100% !important;
-            margin-bottom: 10px;
-        }}
-    }}
-    </style>
-    <div class="predictions-container">
+    <div class="top-predictions-grid">
         {cards_html}
     </div>
     """, unsafe_allow_html=True)
