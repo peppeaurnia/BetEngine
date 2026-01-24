@@ -1793,6 +1793,9 @@ if calculate_btn:
                 saved_details = []  # Debug
                 failed_details = []  # Debug errori
                 
+                # DEBUG: mostra quanti pronostici stiamo processando
+                st.caption(f"📊 Pronostici da salvare: {len(top_predictions)} → {[p['short'] for p in top_predictions]}")
+                
                 for idx, pred in enumerate(top_predictions):
                     # Determina il mercato
                     short = pred['short']

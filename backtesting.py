@@ -253,9 +253,16 @@ def save_match_predictions(
 # RECUPERO RISULTATI REALI
 # ============================================================
 
-def get_match_result_from_api(api_key: str, match_id: int) -> Optional[Dict]:
+def get_match_result_from_api(api_key: str, match_id: int, 
+                              expected_home: str = None, expected_away: str = None) -> Optional[Dict]:
     """
     Recupera il risultato reale di una partita dall'API.
+    
+    Args:
+        api_key: API key
+        match_id: ID partita
+        expected_home: Nome atteso squadra casa (per verifica)
+        expected_away: Nome atteso squadra trasferta (per verifica)
     
     Returns:
         Dict con home_goals, away_goals, status o None se errore
@@ -276,6 +283,23 @@ def get_match_result_from_api(api_key: str, match_id: int) -> Optional[Dict]:
         
         if data.get("response"):
             fixture = data["response"][0]
+            
+            # VERIFICA: la partita corrisponde ai nomi attesi?
+            if expected_home and expected_away:
+                api_home = fixture["teams"]["home"]["name"].lower()
+                api_away = fixture["teams"]["away"]["name"].lower()
+                
+                home_ok = expected_home.lower() in api_home or api_home in expected_home.lower()
+                away_ok = expected_away.lower() in api_away or api_away in expected_away.lower()
+                
+                if not (home_ok and away_ok):
+                    # Partita sbagliata! Restituisci errore per forzare ricerca per nome
+                    return {
+                        "error": f"ID:{match_id} è {api_home} vs {api_away}, non {expected_home} vs {expected_away}",
+                        "wrong_match": True,
+                        "not_finished": False
+                    }
+            
             status = fixture["fixture"]["status"]["short"]
             
             # Solo partite finite (FT, AET, PEN)
@@ -497,11 +521,11 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
         
         stats["checked"] += 1
         
-        # 1. Prima prova con match_id diretto
-        result = get_match_result_from_api(api_key, match_id)
+        # 1. Prima prova con match_id diretto (verifica che sia la partita giusta)
+        result = get_match_result_from_api(api_key, match_id, home_team, away_team)
         
-        # 2. Se fallisce o dà errore, cerca per nome squadra e data
-        if not result or result.get("error"):
+        # 2. Se fallisce, dà errore, o è partita sbagliata -> cerca per nome squadra e data
+        if not result or result.get("error") or result.get("wrong_match"):
             result = search_match_result_by_teams(
                 api_key, home_team, away_team, match_date, league_id
             )
