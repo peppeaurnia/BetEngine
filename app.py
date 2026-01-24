@@ -54,7 +54,8 @@ from data_fetcher import (
     get_api_predictions,
     get_injuries,
     get_team_shots_avg,
-    get_current_season
+    get_current_season,
+    get_fixture_id
 )
 from team_logos import get_logo_path
 
@@ -1760,9 +1761,6 @@ if calculate_btn:
     # === SALVATAGGIO SOLO TOP PREDICTIONS (BACKTESTING) ===
     if BACKTESTING_AVAILABLE and top_predictions:
         try:
-            # Debug: mostra quanti pronostici stiamo salvando
-            st.caption(f"🔍 Debug: {len(top_predictions)} pronostici da salvare")
-            
             # Init già fatto in session_state, non serve ripeterlo
             if 'backtesting_initialized' not in st.session_state:
                 init_backtesting()
@@ -1772,9 +1770,24 @@ if calculate_btn:
             user_id = get_user_id(username)
             
             if user_id:
-                # Genera un match_id unico
-                match_id_str = f"{home_team_id}_{away_team_id}_{match_date.strftime('%Y%m%d')}"
-                match_id = hash(match_id_str) % 10000000
+                # Cerca il vero fixture_id dall'API
+                real_fixture_id = get_fixture_id(
+                    api_key, 
+                    home_team_id, 
+                    away_team_id, 
+                    selected_league_id, 
+                    selected_season,
+                    match_date.strftime('%Y-%m-%d')
+                )
+                
+                if real_fixture_id:
+                    match_id = real_fixture_id
+                    st.caption(f"🔗 Fixture ID reale trovato: {match_id}")
+                else:
+                    # Fallback: genera hash (ma avvisa che l'aggiornamento potrebbe non funzionare)
+                    match_id_str = f"{home_team_id}_{away_team_id}_{match_date.strftime('%Y%m%d')}"
+                    match_id = hash(match_id_str) % 10000000
+                    st.caption(f"⚠️ Fixture ID non trovato, usando hash: {match_id}")
                 
                 saved_count = 0
                 saved_details = []  # Debug

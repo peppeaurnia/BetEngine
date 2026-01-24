@@ -932,3 +932,65 @@ def get_team_shots_avg(api_key: str, team_id: int, league_id: int, season: int, 
         "shots_on_target_avg": round(total_on_target / matches_counted, 1),
         "matches_analyzed": matches_counted
     }
+
+
+def get_fixture_id(api_key: str, home_team_id: int, away_team_id: int, 
+                   league_id: int, season: int, match_date: str = None) -> Optional[int]:
+    """
+    Trova il vero fixture_id dall'API per una partita specifica.
+    
+    Args:
+        api_key: API key
+        home_team_id: ID squadra casa
+        away_team_id: ID squadra trasferta
+        league_id: ID lega
+        season: Stagione
+        match_date: Data partita (opzionale, formato YYYY-MM-DD)
+    
+    Returns:
+        fixture_id reale o None se non trovato
+    """
+    # Cerca le prossime partite della squadra casa
+    url = f"{BASE_URL}/fixtures"
+    params = {
+        "team": home_team_id,
+        "league": league_id,
+        "season": season,
+        "next": 10  # Prossime 10 partite
+    }
+    
+    headers = _get_headers(api_key)
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        data = response.json()
+        
+        if not data.get("response"):
+            # Prova con le partite già giocate
+            params.pop("next")
+            params["last"] = 10
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            data = response.json()
+        
+        if data.get("response"):
+            for fixture in data["response"]:
+                home_id = fixture["teams"]["home"]["id"]
+                away_id = fixture["teams"]["away"]["id"]
+                
+                # Verifica che sia la partita giusta
+                if home_id == home_team_id and away_id == away_team_id:
+                    fixture_id = fixture["fixture"]["id"]
+                    
+                    # Se specificata la data, verifica anche quella
+                    if match_date:
+                        fixture_date = fixture["fixture"]["date"][:10]  # YYYY-MM-DD
+                        if fixture_date == match_date:
+                            return fixture_id
+                    else:
+                        return fixture_id
+        
+        return None
+        
+    except Exception as e:
+        print(f"Errore ricerca fixture_id: {e}")
+        return None

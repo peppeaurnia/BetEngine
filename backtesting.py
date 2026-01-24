@@ -295,6 +295,66 @@ def get_match_result_from_api(api_key: str, match_id: int) -> Optional[Dict]:
         return {"error": str(e), "not_finished": False}
 
 
+def search_match_result_by_teams(api_key: str, home_team: str, away_team: str, 
+                                  match_date: str, league_id: int = None) -> Optional[Dict]:
+    """
+    Cerca il risultato di una partita tramite nomi squadre e data.
+    Utile quando il match_id non è valido.
+    
+    Args:
+        api_key: API key
+        home_team: Nome squadra casa
+        away_team: Nome squadra trasferta
+        match_date: Data partita (YYYY-MM-DD)
+        league_id: ID lega (opzionale)
+    
+    Returns:
+        Dict con home_goals, away_goals, status, fixture_id o None
+    """
+    url = "https://v3.football.api-sports.io/fixtures"
+    headers = {"x-apisports-key": api_key}
+    
+    params = {
+        "date": match_date,
+        "season": 2025
+    }
+    if league_id:
+        params["league"] = league_id
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        data = response.json()
+        
+        if data.get("response"):
+            for fixture in data["response"]:
+                api_home = fixture["teams"]["home"]["name"].lower()
+                api_away = fixture["teams"]["away"]["name"].lower()
+                
+                # Confronta nomi (case-insensitive e partial match)
+                home_match = home_team.lower() in api_home or api_home in home_team.lower()
+                away_match = away_team.lower() in api_away or api_away in away_team.lower()
+                
+                if home_match and away_match:
+                    status = fixture["fixture"]["status"]["short"]
+                    
+                    if status in ["FT", "AET", "PEN"]:
+                        goals = fixture["goals"]
+                        return {
+                            "home_goals": goals["home"],
+                            "away_goals": goals["away"],
+                            "status": status,
+                            "total_goals": goals["home"] + goals["away"],
+                            "fixture_id": fixture["fixture"]["id"]
+                        }
+                    else:
+                        return {"status": status, "not_finished": True, 
+                                "fixture_id": fixture["fixture"]["id"]}
+        
+        return None
+    except Exception as e:
+        return {"error": str(e), "not_finished": False}
+
+
 def determine_prediction_outcome(
     market: str,
     selection: str,
@@ -399,6 +459,7 @@ def determine_prediction_outcome(
 def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
     """
     Aggiorna tutte le previsioni pendenti con i risultati reali.
+    Usa prima il match_id, poi cerca per nome squadra e data se fallisce.
     
     Returns:
         Dict con statistiche aggiornamento
@@ -407,9 +468,8 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     # Trova previsioni senza risultato per partite passate
-    # Usa <= CURRENT_DATE per includere anche partite di oggi che potrebbero essere finite
     query = """
-        SELECT DISTINCT match_id, match_date, home_team, away_team
+        SELECT DISTINCT match_id, match_date, home_team, away_team, league_id
         FROM predictions 
         WHERE is_won IS NULL 
         AND match_date <= CURRENT_DATE
@@ -425,40 +485,67 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
         "updated": 0,
         "not_finished": 0,
         "errors": 0,
-        "debug_matches": []  # Per debug
+        "debug_matches": []
     }
     
     for match in pending_matches:
         match_id = match["match_id"]
+        home_team = match["home_team"]
+        away_team = match["away_team"]
+        match_date = str(match["match_date"])
+        league_id = match.get("league_id")
+        
         stats["checked"] += 1
         
-        # Recupera risultato
+        # 1. Prima prova con match_id diretto
         result = get_match_result_from_api(api_key, match_id)
+        
+        # 2. Se fallisce o dà errore, cerca per nome squadra e data
+        if not result or result.get("error"):
+            result = search_match_result_by_teams(
+                api_key, home_team, away_team, match_date, league_id
+            )
+            
+            # Se trovato, aggiorna anche il match_id nel database
+            if result and result.get("fixture_id") and not result.get("error"):
+                new_fixture_id = result["fixture_id"]
+                try:
+                    cursor.execute("""
+                        UPDATE predictions SET match_id = %s 
+                        WHERE match_id = %s
+                    """, (new_fixture_id, match_id))
+                    conn.commit()
+                    stats["debug_matches"].append(f"🔄 {home_team} vs {away_team} - Match ID corretto: {match_id} → {new_fixture_id}")
+                except:
+                    pass
         
         if not result:
             stats["errors"] += 1
-            stats["debug_matches"].append(f"❌ {match['home_team']} vs {match['away_team']} (ID:{match_id}) - Nessuna risposta API")
+            stats["debug_matches"].append(f"❌ {home_team} vs {away_team} (ID:{match_id}) - Non trovato")
             continue
         
-        # Gestisci errore specifico
         if result.get("error"):
             stats["errors"] += 1
-            stats["debug_matches"].append(f"❌ {match['home_team']} vs {match['away_team']} (ID:{match_id}) - {result['error']}")
+            stats["debug_matches"].append(f"❌ {home_team} vs {away_team} (ID:{match_id}) - {result['error']}")
             continue
         
         if result.get("not_finished"):
             stats["not_finished"] += 1
-            stats["debug_matches"].append(f"⏳ {match['home_team']} vs {match['away_team']} (ID:{match_id}) - Status: {result.get('status', 'N/A')}")
+            stats["debug_matches"].append(f"⏳ {home_team} vs {away_team} (ID:{match_id}) - Status: {result.get('status', 'N/A')}")
             continue
         
         home_goals = result["home_goals"]
         away_goals = result["away_goals"]
         
+        # Usa il match_id corretto (quello nuovo se è stato aggiornato)
+        current_match_id = result.get("fixture_id", match_id)
+        
         # Aggiorna tutte le previsioni per questa partita
+        # Cerca sia con il vecchio che col nuovo match_id
         cursor.execute("""
             SELECT id, market, selection FROM predictions
-            WHERE match_id = %s AND is_won IS NULL
-        """, (match_id,))
+            WHERE (match_id = %s OR match_id = %s) AND is_won IS NULL
+        """, (match_id, current_match_id))
         
         predictions = cursor.fetchall()
         
@@ -484,7 +571,7 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
                 stats["updated"] += 1
         
         if predictions:
-            stats["debug_matches"].append(f"✅ {match['home_team']} vs {match['away_team']} - {home_goals}-{away_goals}")
+            stats["debug_matches"].append(f"✅ {home_team} vs {away_team} - {home_goals}-{away_goals}")
     
     conn.commit()
     cursor.close()
@@ -994,6 +1081,68 @@ def display_update_tab(user_id: int, api_key: str):
     
     st.markdown("---")
     
+    # === RESET PREVISIONI ERRATE ===
+    st.markdown("### 🔧 Correggi Previsioni Errate")
+    st.markdown("""
+    <p style="color:#e74c3c;">
+    Se i risultati mostrati sono sbagliati, seleziona la partita per resettarla e riaggiornarla.
+    </p>
+    """, unsafe_allow_html=True)
+    
+    # Carica partite già aggiornate (per poterle resettare)
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cursor.execute("""
+        SELECT DISTINCT match_id, match_date, home_team, away_team, league_name, home_goals, away_goals
+        FROM predictions
+        WHERE user_id = %s AND is_won IS NOT NULL
+        ORDER BY match_date DESC
+        LIMIT 20
+    """, (user_id,))
+    
+    settled_matches = cursor.fetchall()
+    
+    if settled_matches:
+        reset_options = {
+            f"{m['home_team']} vs {m['away_team']} ({m['home_goals']}-{m['away_goals']}) - {m['match_date']}": m 
+            for m in settled_matches
+        }
+        
+        selected_reset = st.selectbox(
+            "Seleziona partita da correggere:",
+            options=list(reset_options.keys()),
+            key="reset_match"
+        )
+        
+        if st.button("🔄 Reset e Riaggiorna", type="secondary"):
+            match_to_reset = reset_options[selected_reset]
+            
+            # Reset previsioni di questa partita
+            cursor2 = conn.cursor()
+            cursor2.execute("""
+                UPDATE predictions SET
+                    home_goals = NULL,
+                    away_goals = NULL,
+                    actual_result = NULL,
+                    is_won = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE match_id = %s AND user_id = %s
+            """, (match_to_reset['match_id'], user_id))
+            conn.commit()
+            cursor2.close()
+            
+            st.success(f"✅ Reset completato per {match_to_reset['home_team']} vs {match_to_reset['away_team']}")
+            st.info("Clicca 'Aggiorna Risultati Partite' per recuperare il risultato corretto.")
+            st.rerun()
+    else:
+        st.info("Nessuna partita con risultato da correggere.")
+    
+    cursor.close()
+    conn.close()
+    
+    st.markdown("---")
+    
     # === AGGIORNAMENTO MANUALE ===
     st.markdown("### ✏️ Aggiornamento Manuale")
     st.markdown("""
@@ -1003,10 +1152,10 @@ def display_update_tab(user_id: int, api_key: str):
     """, unsafe_allow_html=True)
     
     # Carica partite con errori
-    conn = get_connection()
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    conn2 = get_connection()
+    cursor2 = conn2.cursor(cursor_factory=RealDictCursor)
     
-    cursor.execute("""
+    cursor2.execute("""
         SELECT DISTINCT match_id, match_date, home_team, away_team, league_name
         FROM predictions
         WHERE user_id = %s AND is_won IS NULL AND match_date <= CURRENT_DATE
@@ -1014,9 +1163,9 @@ def display_update_tab(user_id: int, api_key: str):
         LIMIT 20
     """, (user_id,))
     
-    pending_for_manual = cursor.fetchall()
-    cursor.close()
-    conn.close()
+    pending_for_manual = cursor2.fetchall()
+    cursor2.close()
+    conn2.close()
     
     if pending_for_manual and len(pending_for_manual) > 0:
         # Dropdown per selezionare partita
