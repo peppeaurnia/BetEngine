@@ -54,8 +54,7 @@ from data_fetcher import (
     get_api_predictions,
     get_injuries,
     get_team_shots_avg,
-    get_current_season,
-    get_fixture_id
+    get_current_season
 )
 from team_logos import get_logo_path
 
@@ -1761,7 +1760,6 @@ if calculate_btn:
     # === SALVATAGGIO SOLO TOP PREDICTIONS (BACKTESTING) ===
     if BACKTESTING_AVAILABLE and top_predictions:
         try:
-            # Init già fatto in session_state, non serve ripeterlo
             if 'backtesting_initialized' not in st.session_state:
                 init_backtesting()
                 st.session_state.backtesting_initialized = True
@@ -1770,35 +1768,15 @@ if calculate_btn:
             user_id = get_user_id(username)
             
             if user_id:
-                # Cerca il vero fixture_id dall'API
-                real_fixture_id = get_fixture_id(
-                    api_key, 
-                    home_team_id, 
-                    away_team_id, 
-                    selected_league_id, 
-                    selected_season,
-                    match_date.strftime('%Y-%m-%d')
-                )
-                
-                if real_fixture_id:
-                    match_id = real_fixture_id
-                    st.caption(f"🔗 Fixture ID reale trovato: {match_id}")
-                else:
-                    # Fallback: genera hash (ma avvisa che l'aggiornamento potrebbe non funzionare)
-                    match_id_str = f"{home_team_id}_{away_team_id}_{match_date.strftime('%Y%m%d')}"
-                    match_id = hash(match_id_str) % 10000000
-                    st.caption(f"⚠️ Fixture ID non trovato, usando hash: {match_id}")
+                # Match ID semplice (non più usato per aggiornamenti, solo come riferimento)
+                match_id = hash(f"{home_team_name}_{away_team_name}_{match_date}") % 10000000
                 
                 saved_count = 0
-                saved_details = []  # Debug
-                failed_details = []  # Debug errori
                 
-                # DEBUG: mostra quanti pronostici stiamo processando
-                st.caption(f"📊 Pronostici da salvare: {len(top_predictions)} → {[p['short'] for p in top_predictions]}")
-                
-                for idx, pred in enumerate(top_predictions):
-                    # Determina il mercato
+                for pred in top_predictions:
                     short = pred['short']
+                    
+                    # Determina il mercato
                     if short in ['1', 'X', '2']:
                         market = '1X2'
                     elif short in ['GG', 'NG']:
@@ -1807,45 +1785,33 @@ if calculate_btn:
                         market = 'Cards'
                     elif short.startswith('O') or short.startswith('U'):
                         market = 'Over/Under'
-                    elif short.startswith('C'):
-                        market = 'Cards'
                     else:
                         market = 'Altro'
                     
-                    try:
-                        # Converti a float Python nativo (non numpy)
-                        prob_value = float(pred['prob'] / 100)
-                        stars_value = int(pred.get('stars', 3))
-                        
-                        result = save_prediction(
-                            user_id=user_id,
-                            match_id=match_id,
-                            match_date=match_date.strftime('%Y-%m-%d'),
-                            league_id=selected_league_id,
-                            league_name=selected_league_name,
-                            home_team=home_team_name,
-                            away_team=away_team_name,
-                            market=market,
-                            selection=short,
-                            predicted_prob=prob_value,
-                            confidence_stars=stars_value
-                        )
-                        
-                        if result:
-                            saved_count += 1
-                            saved_details.append(f"{market}: {short}")
-                        else:
-                            failed_details.append(f"{market}: {short} (save returned False)")
-                    except Exception as save_err:
-                        failed_details.append(f"{market}: {short} (Error: {save_err})")
+                    # Converti a float Python nativo
+                    prob_value = float(pred['prob'] / 100)
+                    stars_value = int(pred.get('stars', 3))
+                    
+                    if save_prediction(
+                        user_id=user_id,
+                        match_id=match_id,
+                        match_date=match_date.strftime('%Y-%m-%d'),
+                        league_id=selected_league_id,
+                        league_name=selected_league_name,
+                        home_team=home_team_name,
+                        away_team=away_team_name,
+                        market=market,
+                        selection=short,
+                        predicted_prob=prob_value,
+                        confidence_stars=stars_value
+                    ):
+                        saved_count += 1
                 
                 if saved_count > 0:
-                    st.toast(f"💾 {saved_count}/{len(top_predictions)} salvati: {', '.join(saved_details)}", icon="✅")
-                
-                if failed_details:
-                    st.warning(f"⚠️ Non salvati: {', '.join(failed_details)}")
+                    st.toast(f"💾 {saved_count} pronostici salvati!", icon="✅")
+                    
         except Exception as e:
-            st.error(f"Errore salvataggio backtesting: {e}")
+            pass  # Silenzioso se fallisce
     
     st.markdown("---")
     

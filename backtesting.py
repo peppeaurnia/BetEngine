@@ -61,10 +61,26 @@ def init_predictions_table():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP,
             
-            -- Indici per query veloci
-            UNIQUE(user_id, match_id, market, selection)
+            -- Chiave univoca basata su squadre, data e mercato (non match_id!)
+            UNIQUE(user_id, home_team, away_team, match_date, market, selection)
         )
     """)
+    
+    # Rimuovi vecchio constraint se esiste e aggiungi nuovo
+    try:
+        cursor.execute("""
+            ALTER TABLE predictions DROP CONSTRAINT IF EXISTS predictions_user_id_match_id_market_selection_key
+        """)
+    except:
+        pass
+    
+    try:
+        cursor.execute("""
+            ALTER TABLE predictions ADD CONSTRAINT predictions_match_unique 
+            UNIQUE(user_id, home_team, away_team, match_date, market, selection)
+        """)
+    except:
+        pass  # Già esiste
     
     # Crea indici per performance
     cursor.execute("""
@@ -135,12 +151,13 @@ def save_prediction(
              home_team, away_team, market, selection, predicted_prob,
              best_odds, expected_value, confidence_stars)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (user_id, match_id, market, selection) 
+            ON CONFLICT (user_id, home_team, away_team, match_date, market, selection) 
             DO UPDATE SET
                 predicted_prob = EXCLUDED.predicted_prob,
                 best_odds = EXCLUDED.best_odds,
                 expected_value = EXCLUDED.expected_value,
                 confidence_stars = EXCLUDED.confidence_stars,
+                match_id = EXCLUDED.match_id,
                 updated_at = CURRENT_TIMESTAMP
         """, (
             user_id, match_id, match_date, league_id, league_name,
@@ -483,7 +500,7 @@ def determine_prediction_outcome(
 def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
     """
     Aggiorna tutte le previsioni pendenti con i risultati reali.
-    Usa prima il match_id, poi cerca per nome squadra e data se fallisce.
+    SEMPLIFICATO: cerca SEMPRE per nome squadra e data (più affidabile).
     
     Returns:
         Dict con statistiche aggiornamento
@@ -493,7 +510,7 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
     
     # Trova previsioni senza risultato per partite passate
     query = """
-        SELECT DISTINCT match_id, match_date, home_team, away_team, league_id
+        SELECT DISTINCT home_team, away_team, match_date, league_id
         FROM predictions 
         WHERE is_won IS NULL 
         AND match_date <= CURRENT_DATE
@@ -513,7 +530,6 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
     }
     
     for match in pending_matches:
-        match_id = match["match_id"]
         home_team = match["home_team"]
         away_team = match["away_team"]
         match_date = str(match["match_date"])
@@ -521,55 +537,34 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
         
         stats["checked"] += 1
         
-        # 1. Prima prova con match_id diretto (verifica che sia la partita giusta)
-        result = get_match_result_from_api(api_key, match_id, home_team, away_team)
-        
-        # 2. Se fallisce, dà errore, o è partita sbagliata -> cerca per nome squadra e data
-        if not result or result.get("error") or result.get("wrong_match"):
-            result = search_match_result_by_teams(
-                api_key, home_team, away_team, match_date, league_id
-            )
-            
-            # Se trovato, aggiorna anche il match_id nel database
-            if result and result.get("fixture_id") and not result.get("error"):
-                new_fixture_id = result["fixture_id"]
-                try:
-                    cursor.execute("""
-                        UPDATE predictions SET match_id = %s 
-                        WHERE match_id = %s
-                    """, (new_fixture_id, match_id))
-                    conn.commit()
-                    stats["debug_matches"].append(f"🔄 {home_team} vs {away_team} - Match ID corretto: {match_id} → {new_fixture_id}")
-                except:
-                    pass
+        # Cerca SEMPRE per nome squadra e data (più affidabile!)
+        result = search_match_result_by_teams(
+            api_key, home_team, away_team, match_date, league_id
+        )
         
         if not result:
             stats["errors"] += 1
-            stats["debug_matches"].append(f"❌ {home_team} vs {away_team} (ID:{match_id}) - Non trovato")
+            stats["debug_matches"].append(f"❌ {home_team} vs {away_team} ({match_date}) - Non trovato")
             continue
         
         if result.get("error"):
             stats["errors"] += 1
-            stats["debug_matches"].append(f"❌ {home_team} vs {away_team} (ID:{match_id}) - {result['error']}")
+            stats["debug_matches"].append(f"❌ {home_team} vs {away_team} - {result['error']}")
             continue
         
         if result.get("not_finished"):
             stats["not_finished"] += 1
-            stats["debug_matches"].append(f"⏳ {home_team} vs {away_team} (ID:{match_id}) - Status: {result.get('status', 'N/A')}")
+            stats["debug_matches"].append(f"⏳ {home_team} vs {away_team} - {result.get('status', 'N/A')}")
             continue
         
         home_goals = result["home_goals"]
         away_goals = result["away_goals"]
         
-        # Usa il match_id corretto (quello nuovo se è stato aggiornato)
-        current_match_id = result.get("fixture_id", match_id)
-        
-        # Aggiorna tutte le previsioni per questa partita
-        # Cerca sia con il vecchio che col nuovo match_id
+        # Aggiorna tutte le previsioni per questa partita (cerca per nome squadra e data)
         cursor.execute("""
             SELECT id, market, selection FROM predictions
-            WHERE (match_id = %s OR match_id = %s) AND is_won IS NULL
-        """, (match_id, current_match_id))
+            WHERE home_team = %s AND away_team = %s AND match_date = %s AND is_won IS NULL
+        """, (home_team, away_team, match_date))
         
         predictions = cursor.fetchall()
         
@@ -1142,7 +1137,7 @@ def display_update_tab(user_id: int, api_key: str):
         if st.button("🔄 Reset e Riaggiorna", type="secondary"):
             match_to_reset = reset_options[selected_reset]
             
-            # Reset previsioni di questa partita
+            # Reset previsioni di questa partita (cerca per nomi squadre e data)
             cursor2 = conn.cursor()
             cursor2.execute("""
                 UPDATE predictions SET
@@ -1151,8 +1146,9 @@ def display_update_tab(user_id: int, api_key: str):
                     actual_result = NULL,
                     is_won = NULL,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE match_id = %s AND user_id = %s
-            """, (match_to_reset['match_id'], user_id))
+                WHERE home_team = %s AND away_team = %s AND match_date = %s AND user_id = %s
+            """, (match_to_reset['home_team'], match_to_reset['away_team'], 
+                  match_to_reset['match_date'], user_id))
             conn.commit()
             cursor2.close()
             
@@ -1215,14 +1211,16 @@ def display_update_tab(user_id: int, api_key: str):
                     away_goals = st.number_input(f"Gol {selected_match['away_team']}", min_value=0, max_value=15, value=0)
                 
                 if st.button("💾 Salva Risultato Manuale", type="secondary"):
-                    # Aggiorna tutte le previsioni per questa partita
+                    # Aggiorna tutte le previsioni per questa partita (cerca per nomi squadre e data)
                     conn = get_connection()
                     cursor = conn.cursor(cursor_factory=RealDictCursor)
                     
                     cursor.execute("""
                         SELECT id, market, selection FROM predictions
-                        WHERE match_id = %s AND user_id = %s AND is_won IS NULL
-                    """, (selected_match['match_id'], user_id))
+                        WHERE home_team = %s AND away_team = %s AND match_date = %s 
+                        AND user_id = %s AND is_won IS NULL
+                    """, (selected_match['home_team'], selected_match['away_team'],
+                          selected_match['match_date'], user_id))
                     
                     predictions = cursor.fetchall()
                     updated = 0
