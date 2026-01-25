@@ -96,6 +96,14 @@ def init_predictions_table():
         ON predictions(market)
     """)
     
+    # Aggiungi colonna archived se non esiste (per mantenere statistiche dopo eliminazione)
+    try:
+        cursor.execute("""
+            ALTER TABLE predictions ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE
+        """)
+    except:
+        pass
+    
     conn.commit()
     cursor.close()
     conn.close()
@@ -551,12 +559,13 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    # Trova previsioni senza risultato per partite passate
+    # Trova previsioni senza risultato per partite passate (escludi archiviate)
     query = """
         SELECT DISTINCT home_team, away_team, match_date, league_id
         FROM predictions 
         WHERE is_won IS NULL 
         AND match_date <= CURRENT_DATE
+        AND (archived IS NULL OR archived = FALSE)
     """
     if user_id:
         query += f" AND user_id = {user_id}"
@@ -608,6 +617,7 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
         cursor.execute("""
             SELECT id, market, selection FROM predictions
             WHERE home_team = %s AND away_team = %s AND match_date = %s AND is_won IS NULL
+            AND (archived IS NULL OR archived = FALSE)
         """, (home_team, away_team, match_date))
         
         predictions = cursor.fetchall()
@@ -802,7 +812,7 @@ def get_predictions_history(
             home_goals, away_goals, actual_result, is_won,
             created_at
         FROM predictions
-        WHERE user_id = %s
+        WHERE user_id = %s AND (archived IS NULL OR archived = FALSE)
     """
     params = [user_id]
     
@@ -840,6 +850,7 @@ def get_best_predictions(user_id: int, min_prob: float = 0.55, limit: int = 20) 
         WHERE user_id = %s
         AND match_date >= CURRENT_DATE
         AND predicted_prob >= %s
+        AND (archived IS NULL OR archived = FALSE)
         ORDER BY predicted_prob DESC
         LIMIT %s
     """, (user_id, min_prob, limit))
@@ -857,12 +868,25 @@ def get_best_predictions(user_id: int, min_prob: float = 0.55, limit: int = 20) 
 # ============================================================
 
 def delete_prediction(prediction_id: int) -> bool:
-    """Elimina una singola previsione."""
+    """
+    Elimina o archivia una singola previsione.
+    - Se già calcolata (is_won NOT NULL): archivia (mantiene statistiche)
+    - Se non calcolata: elimina completamente
+    """
     conn = get_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("DELETE FROM predictions WHERE id = %s", (prediction_id,))
+        # Archivia le previsioni già calcolate, elimina le altre
+        cursor.execute("""
+            UPDATE predictions SET archived = TRUE 
+            WHERE id = %s AND is_won IS NOT NULL
+        """, (prediction_id,))
+        
+        if cursor.rowcount == 0:
+            # Non era calcolata, elimina completamente
+            cursor.execute("DELETE FROM predictions WHERE id = %s AND is_won IS NULL", (prediction_id,))
+        
         conn.commit()
         return True
     except Exception as e:
@@ -875,18 +899,31 @@ def delete_prediction(prediction_id: int) -> bool:
 
 
 def delete_match_predictions(user_id: int, match_id: int) -> int:
-    """Elimina tutte le previsioni di una partita."""
+    """
+    Elimina o archivia tutte le previsioni di una partita.
+    - Previsioni calcolate: archiviate (mantengono statistiche)
+    - Previsioni non calcolate: eliminate
+    """
     conn = get_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute(
-            "DELETE FROM predictions WHERE user_id = %s AND match_id = %s",
-            (user_id, match_id)
-        )
+        # Archivia previsioni già calcolate
+        cursor.execute("""
+            UPDATE predictions SET archived = TRUE 
+            WHERE user_id = %s AND match_id = %s AND is_won IS NOT NULL
+        """, (user_id, match_id))
+        archived = cursor.rowcount
+        
+        # Elimina previsioni non calcolate
+        cursor.execute("""
+            DELETE FROM predictions 
+            WHERE user_id = %s AND match_id = %s AND is_won IS NULL
+        """, (user_id, match_id))
         deleted = cursor.rowcount
+        
         conn.commit()
-        return deleted
+        return archived + deleted
     except Exception as e:
         conn.rollback()
         print(f"Errore eliminazione: {e}")
@@ -897,15 +934,31 @@ def delete_match_predictions(user_id: int, match_id: int) -> int:
 
 
 def delete_all_predictions(user_id: int) -> int:
-    """Elimina TUTTE le previsioni di un utente."""
+    """
+    Elimina o archivia TUTTE le previsioni di un utente.
+    - Previsioni calcolate: archiviate (mantengono statistiche)
+    - Previsioni non calcolate: eliminate
+    """
     conn = get_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("DELETE FROM predictions WHERE user_id = %s", (user_id,))
+        # Archivia previsioni già calcolate
+        cursor.execute("""
+            UPDATE predictions SET archived = TRUE 
+            WHERE user_id = %s AND is_won IS NOT NULL
+        """, (user_id,))
+        archived = cursor.rowcount
+        
+        # Elimina previsioni non calcolate
+        cursor.execute("""
+            DELETE FROM predictions 
+            WHERE user_id = %s AND is_won IS NULL
+        """, (user_id,))
         deleted = cursor.rowcount
+        
         conn.commit()
-        return deleted
+        return archived + deleted
     except Exception as e:
         conn.rollback()
         print(f"Errore eliminazione: {e}")
@@ -1179,7 +1232,7 @@ def display_update_tab(user_id: int, api_key: str):
     cursor.execute("""
         SELECT DISTINCT match_id, match_date, home_team, away_team, league_name, home_goals, away_goals
         FROM predictions
-        WHERE user_id = %s AND is_won IS NOT NULL
+        WHERE user_id = %s AND is_won IS NOT NULL AND (archived IS NULL OR archived = FALSE)
         ORDER BY match_date DESC
         LIMIT 20
     """, (user_id,))
@@ -1243,6 +1296,7 @@ def display_update_tab(user_id: int, api_key: str):
         SELECT DISTINCT match_id, match_date, home_team, away_team, league_name
         FROM predictions
         WHERE user_id = %s AND is_won IS NULL AND match_date <= CURRENT_DATE
+        AND (archived IS NULL OR archived = FALSE)
         ORDER BY match_date DESC
         LIMIT 20
     """, (user_id,))
@@ -1286,6 +1340,7 @@ def display_update_tab(user_id: int, api_key: str):
                         SELECT id, market, selection FROM predictions
                         WHERE home_team = %s AND away_team = %s AND match_date = %s 
                         AND user_id = %s AND is_won IS NULL
+                        AND (archived IS NULL OR archived = FALSE)
                     """, (selected_match['home_team'], selected_match['away_team'],
                           selected_match['match_date'], user_id))
                     
@@ -1341,7 +1396,7 @@ def display_update_tab(user_id: int, api_key: str):
     cursor.execute("""
         SELECT DISTINCT match_id, match_date, home_team, away_team, league_name
         FROM predictions
-        WHERE user_id = %s AND is_won IS NULL
+        WHERE user_id = %s AND is_won IS NULL AND (archived IS NULL OR archived = FALSE)
         ORDER BY match_date DESC
         LIMIT 15
     """, (user_id,))
@@ -1380,7 +1435,7 @@ def display_manage_tab(user_id: int):
         SELECT DISTINCT match_id, match_date, home_team, away_team, league_name,
                COUNT(*) as num_predictions
         FROM predictions
-        WHERE user_id = %s
+        WHERE user_id = %s AND (archived IS NULL OR archived = FALSE)
         GROUP BY match_id, match_date, home_team, away_team, league_name
         ORDER BY match_date DESC
         LIMIT 50
@@ -1397,7 +1452,8 @@ def display_manage_tab(user_id: int):
     st.markdown(f"""
     <p style="color:#a8d4f0;">
     Hai <strong style="color:#4fc3f7;">{len(matches)}</strong> partite salvate. 
-    Seleziona quelle da eliminare.
+    Elimina quelle che non vuoi più vedere.
+    <br><small style="color:#f39c12;">📊 Le partite già calcolate saranno archiviate e le statistiche mantenute!</small>
     </p>
     """, unsafe_allow_html=True)
     
@@ -1439,15 +1495,16 @@ def display_manage_tab(user_id: int):
     st.markdown("### ⚠️ Zona Pericolosa")
     
     st.markdown("""
-    <p style="color:#e74c3c;">
-    Attenzione: questa azione è irreversibile!
+    <p style="color:#f39c12;">
+    📊 <strong>Nota:</strong> Le previsioni già calcolate verranno archiviate, non eliminate.
+    Le statistiche (accuracy, ROI, vincite/perdite) saranno mantenute!
     </p>
     """, unsafe_allow_html=True)
     
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        confirm = st.checkbox("✅ Confermo di voler eliminare TUTTE le previsioni", key="confirm_delete_all")
+        confirm = st.checkbox("✅ Confermo di voler eliminare/archiviare TUTTE le previsioni", key="confirm_delete_all")
     
     with col2:
         if st.button("🗑️ ELIMINA TUTTO", type="primary", disabled=not confirm):
