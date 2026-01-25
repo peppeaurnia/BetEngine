@@ -395,8 +395,9 @@ def search_match_result_by_teams(api_key: str, home_team: str, away_team: str,
 def get_match_cards(api_key: str, fixture_id: int) -> Optional[int]:
     """
     Recupera il totale cartellini (gialli + rossi) di una partita.
+    Usa l'endpoint /fixtures/events che contiene tutti gli eventi.
     """
-    url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
+    url = f"https://v3.football.api-sports.io/fixtures/events?fixture={fixture_id}"
     headers = {"x-apisports-key": api_key}
     
     try:
@@ -406,21 +407,14 @@ def get_match_cards(api_key: str, fixture_id: int) -> Optional[int]:
         total_cards = 0
         
         if data.get("response"):
-            for team_stats in data["response"]:
-                stats = team_stats.get("statistics", [])
-                for stat in stats:
-                    stat_type = stat.get("type", "").lower()
-                    value = stat.get("value")
-                    
-                    if value is None:
-                        value = 0
-                    elif isinstance(value, str):
-                        value = int(value) if value.isdigit() else 0
-                    
-                    if "yellow" in stat_type and "card" in stat_type:
-                        total_cards += value
-                    elif "red" in stat_type and "card" in stat_type:
-                        total_cards += value
+            for event in data["response"]:
+                event_type = event.get("type", "").lower()
+                
+                # Conta cartellini gialli e rossi
+                if event_type == "card":
+                    detail = event.get("detail", "").lower()
+                    if "yellow" in detail or "red" in detail:
+                        total_cards += 1
         
         return total_cards if total_cards > 0 else None
         
