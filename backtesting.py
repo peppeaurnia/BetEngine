@@ -738,19 +738,37 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     
     daily_trend = cursor.fetchall()
     
+    # Calcola ROI con quote REALI dal database
+    cursor2 = conn.cursor(cursor_factory=RealDictCursor)
+    cursor2.execute("""
+        SELECT is_won, best_odds
+        FROM predictions
+        WHERE user_id = %s AND created_at >= %s AND is_won IS NOT NULL
+    """, (user_id, date_limit))
+    
+    settled_bets = cursor2.fetchall()
+    cursor2.close()
+    
     cursor.close()
     conn.close()
     
-    # Calcola accuracy e ROI simulato
+    # Calcola accuracy
     total_settled = general["settled"] or 0
     total_won = general["won"] or 0
     accuracy = (total_won / total_settled * 100) if total_settled > 0 else 0
     
-    # ROI simulato (assumendo stake €10 e quota media 1.85)
-    avg_odds = 1.85
-    stake = 10
-    total_staked = total_settled * stake
-    total_return = total_won * stake * avg_odds
+    # ROI REALE con quote effettive
+    stake = 10  # €10 per scommessa
+    total_staked = 0
+    total_return = 0
+    
+    for bet in settled_bets:
+        total_staked += stake
+        if bet["is_won"] == 1:
+            # Usa la quota salvata, o 1.85 come fallback se non presente
+            odds = float(bet["best_odds"]) if bet["best_odds"] else 1.85
+            total_return += stake * odds
+    
     roi = ((total_return - total_staked) / total_staked * 100) if total_staked > 0 else 0
     profit = total_return - total_staked
     

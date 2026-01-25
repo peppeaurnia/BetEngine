@@ -58,6 +58,13 @@ from data_fetcher import (
 )
 from team_logos import get_logo_path
 
+# Import The Odds API per quote reali bookmaker
+try:
+    from odds_api import get_best_odds_for_selection, fetch_match_odds
+    ODDS_API_AVAILABLE = True
+except ImportError:
+    ODDS_API_AVAILABLE = False
+
 # Funzione per nomi italianizzati (inline per evitare problemi import)
 DISPLAY_NAMES = {
     # Bundesliga - nomi esatti dall'API
@@ -1771,7 +1778,16 @@ if calculate_btn:
                 # Match ID semplice (non più usato per aggiornamenti, solo come riferimento)
                 match_id = hash(f"{home_team_name}_{away_team_name}_{match_date}") % 10000000
                 
+                # 🎰 Recupera quote REALI da The Odds API (una volta per partita)
+                real_odds = {}
+                if ODDS_API_AVAILABLE:
+                    try:
+                        real_odds = fetch_match_odds(home_team_name, away_team_name, selected_league_id)
+                    except:
+                        pass
+                
                 saved_count = 0
+                odds_source = "📊 modello" if not real_odds else "🎰 bookmaker"
                 
                 for pred in top_predictions:
                     short = pred['short']
@@ -1792,6 +1808,13 @@ if calculate_btn:
                     prob_value = float(pred['prob'] / 100)
                     stars_value = int(pred.get('stars', 3))
                     
+                    # 🎰 Usa quota REALE se disponibile, altrimenti calcola dal modello
+                    if short in real_odds:
+                        best_odds = real_odds[short]
+                    else:
+                        # Fallback: quota implicita dal modello (100/prob)
+                        best_odds = round(100 / max(pred['prob'], 1), 2)
+                    
                     if save_prediction(
                         user_id=user_id,
                         match_id=match_id,
@@ -1803,12 +1826,13 @@ if calculate_btn:
                         market=market,
                         selection=short,
                         predicted_prob=prob_value,
+                        best_odds=best_odds,
                         confidence_stars=stars_value
                     ):
                         saved_count += 1
                 
                 if saved_count > 0:
-                    st.toast(f"💾 {saved_count} pronostici salvati!", icon="✅")
+                    st.toast(f"💾 {saved_count} pronostici salvati (quote {odds_source})!", icon="✅")
                     
         except Exception as e:
             pass  # Silenzioso se fallisce
