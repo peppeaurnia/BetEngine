@@ -340,17 +340,7 @@ def search_match_result_by_teams(api_key: str, home_team: str, away_team: str,
                                   match_date: str, league_id: int = None) -> Optional[Dict]:
     """
     Cerca il risultato di una partita tramite nomi squadre e data.
-    Utile quando il match_id non è valido.
-    
-    Args:
-        api_key: API key
-        home_team: Nome squadra casa
-        away_team: Nome squadra trasferta
-        match_date: Data partita (YYYY-MM-DD)
-        league_id: ID lega (opzionale)
-    
-    Returns:
-        Dict con home_goals, away_goals, status, fixture_id o None
+    Include anche i cartellini totali.
     """
     url = "https://v3.football.api-sports.io/fixtures"
     headers = {"x-apisports-key": api_key}
@@ -377,23 +367,65 @@ def search_match_result_by_teams(api_key: str, home_team: str, away_team: str,
                 
                 if home_match and away_match:
                     status = fixture["fixture"]["status"]["short"]
+                    fixture_id = fixture["fixture"]["id"]
                     
                     if status in ["FT", "AET", "PEN"]:
                         goals = fixture["goals"]
+                        
+                        # Recupera cartellini dalla partita
+                        total_cards = get_match_cards(api_key, fixture_id)
+                        
                         return {
                             "home_goals": goals["home"],
                             "away_goals": goals["away"],
                             "status": status,
                             "total_goals": goals["home"] + goals["away"],
-                            "fixture_id": fixture["fixture"]["id"]
+                            "total_cards": total_cards,
+                            "fixture_id": fixture_id
                         }
                     else:
                         return {"status": status, "not_finished": True, 
-                                "fixture_id": fixture["fixture"]["id"]}
+                                "fixture_id": fixture_id}
         
         return None
     except Exception as e:
         return {"error": str(e), "not_finished": False}
+
+
+def get_match_cards(api_key: str, fixture_id: int) -> Optional[int]:
+    """
+    Recupera il totale cartellini (gialli + rossi) di una partita.
+    """
+    url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
+    headers = {"x-apisports-key": api_key}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json()
+        
+        total_cards = 0
+        
+        if data.get("response"):
+            for team_stats in data["response"]:
+                stats = team_stats.get("statistics", [])
+                for stat in stats:
+                    stat_type = stat.get("type", "").lower()
+                    value = stat.get("value")
+                    
+                    if value is None:
+                        value = 0
+                    elif isinstance(value, str):
+                        value = int(value) if value.isdigit() else 0
+                    
+                    if "yellow" in stat_type and "card" in stat_type:
+                        total_cards += value
+                    elif "red" in stat_type and "card" in stat_type:
+                        total_cards += value
+        
+        return total_cards if total_cards > 0 else None
+        
+    except Exception as e:
+        return None
 
 
 def determine_prediction_outcome(
@@ -470,16 +502,33 @@ def determine_prediction_outcome(
         
         # === Cards ===
         elif market == 'Cards' and total_cards is not None:
-            parts = str(selection).split()
-            if len(parts) < 3:
-                return (None, None)
+            selection_str = str(selection)
             
-            try:
-                line = float(parts[2])  # "Cards Over 3.5" -> 3.5
-            except (ValueError, IndexError):
-                return (None, None)
+            # Formato abbreviato: "CO3.5" o "CU3.5"
+            if selection_str.startswith('CO') and selection_str[2:3].isdigit():
+                is_over = True
+                try:
+                    line = float(selection_str[2:])  # "CO3.5" -> 3.5
+                except ValueError:
+                    return (None, None)
+            elif selection_str.startswith('CU') and selection_str[2:3].isdigit():
+                is_over = False
+                try:
+                    line = float(selection_str[2:])  # "CU3.5" -> 3.5
+                except ValueError:
+                    return (None, None)
+            else:
+                # Formato esteso: "Cards Over 3.5"
+                parts = selection_str.split()
+                if len(parts) < 3:
+                    return (None, None)
                 
-            is_over = parts[1].lower() == 'over'
+                try:
+                    line = float(parts[2])
+                except (ValueError, IndexError):
+                    return (None, None)
+                    
+                is_over = parts[1].lower() == 'over'
             
             if is_over:
                 won = total_cards > line
@@ -559,6 +608,7 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
         
         home_goals = result["home_goals"]
         away_goals = result["away_goals"]
+        total_cards = result.get("total_cards")  # Può essere None
         
         # Aggiorna tutte le previsioni per questa partita (cerca per nome squadra e data)
         cursor.execute("""
@@ -573,7 +623,8 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
                 pred["market"],
                 pred["selection"],
                 home_goals,
-                away_goals
+                away_goals,
+                total_cards  # Passa i cartellini!
             )
             
             if is_won is not None:
@@ -590,7 +641,8 @@ def update_predictions_with_results(api_key: str, user_id: int = None) -> Dict:
                 stats["updated"] += 1
         
         if predictions:
-            stats["debug_matches"].append(f"✅ {home_team} vs {away_team} - {home_goals}-{away_goals}")
+            cards_info = f" | 🟨 {total_cards} carte" if total_cards else ""
+            stats["debug_matches"].append(f"✅ {home_team} vs {away_team} - {home_goals}-{away_goals}{cards_info}")
     
     conn.commit()
     cursor.close()
@@ -1204,11 +1256,14 @@ def display_update_tab(user_id: int, api_key: str):
             if selected_match_key and selected_match_key in match_options:
                 selected_match = match_options[selected_match_key]
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     home_goals = st.number_input(f"Gol {selected_match['home_team']}", min_value=0, max_value=15, value=0)
                 with col2:
                     away_goals = st.number_input(f"Gol {selected_match['away_team']}", min_value=0, max_value=15, value=0)
+                with col3:
+                    total_cards = st.number_input("🟨 Cartellini totali", min_value=0, max_value=20, value=0, 
+                                                   help="Somma cartellini gialli + rossi di entrambe le squadre")
                 
                 if st.button("💾 Salva Risultato Manuale", type="secondary"):
                     # Aggiorna tutte le previsioni per questa partita (cerca per nomi squadre e data)
@@ -1225,12 +1280,16 @@ def display_update_tab(user_id: int, api_key: str):
                     predictions = cursor.fetchall()
                     updated = 0
                     
+                    # Passa None se cartellini = 0 (non inserito)
+                    cards_value = total_cards if total_cards > 0 else None
+                    
                     for pred in predictions:
                         is_won, actual_result = determine_prediction_outcome(
                             pred["market"],
                             pred["selection"],
                             home_goals,
-                            away_goals
+                            away_goals,
+                            cards_value  # Passa i cartellini!
                         )
                         
                         if is_won is not None:
