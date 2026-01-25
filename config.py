@@ -8,13 +8,13 @@ Questo file NON va condiviso pubblicamente!
 # ============================================================
 # 🔑 API KEY - INSERISCI QUI LA TUA CHIAVE
 # ============================================================
-API_FOOTBALL_KEY = "INSERISCI_QUI_LA_TUA_API_KEY"
+API_FOOTBALL_KEY = "bd9e53e0e7a5b3c4cd3e7d8b00fd9e8d"
 
 # ============================================================
 # 🎰 THE ODDS API - Per quote reali bookmaker
 # ============================================================
 # Ottieni una chiave gratuita su: https://the-odds-api.com/
-THE_ODDS_API_KEY = "INSERISCI_QUI_LA_TUA_ODDS_API_KEY"
+THE_ODDS_API_KEY = "f90639c10e0aedb345199dc513866e13"
 
 # ============================================================
 # 🏆 LEGA DEFAULT (ID)
