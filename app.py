@@ -1787,7 +1787,7 @@ if calculate_btn:
                         pass
                 
                 saved_count = 0
-                odds_source = "📊 modello" if not real_odds else "🎰 bookmaker"
+                failed_count = 0
                 
                 for pred in top_predictions:
                     short = pred['short']
@@ -1809,30 +1809,42 @@ if calculate_btn:
                     stars_value = int(pred.get('stars', 3))
                     
                     # 🎰 Usa quota REALE se disponibile, altrimenti calcola dal modello
-                    if short in real_odds:
-                        best_odds = real_odds[short]
+                    # Normalizza short per matching (rimuovi spazi)
+                    short_normalized = short.replace(" ", "")
+                    
+                    if short_normalized in real_odds:
+                        best_odds = float(real_odds[short_normalized])
                     else:
                         # Fallback: quota implicita dal modello (100/prob)
                         best_odds = round(100 / max(pred['prob'], 1), 2)
                     
-                    if save_prediction(
-                        user_id=user_id,
-                        match_id=match_id,
-                        match_date=match_date.strftime('%Y-%m-%d'),
-                        league_id=selected_league_id,
-                        league_name=selected_league_name,
-                        home_team=home_team_name,
-                        away_team=away_team_name,
-                        market=market,
-                        selection=short,
-                        predicted_prob=prob_value,
-                        best_odds=best_odds,
-                        confidence_stars=stars_value
-                    ):
-                        saved_count += 1
+                    # Assicurati che best_odds sia valido
+                    best_odds = max(1.01, min(best_odds, 100.0))  # Limita tra 1.01 e 100
+                    
+                    try:
+                        if save_prediction(
+                            user_id=user_id,
+                            match_id=match_id,
+                            match_date=match_date.strftime('%Y-%m-%d'),
+                            league_id=selected_league_id,
+                            league_name=selected_league_name,
+                            home_team=home_team_name,
+                            away_team=away_team_name,
+                            market=market,
+                            selection=short,
+                            predicted_prob=prob_value,
+                            best_odds=best_odds,
+                            confidence_stars=stars_value
+                        ):
+                            saved_count += 1
+                        else:
+                            failed_count += 1
+                    except Exception as save_err:
+                        failed_count += 1
                 
                 if saved_count > 0:
-                    st.toast(f"💾 {saved_count} pronostici salvati (quote {odds_source})!", icon="✅")
+                    odds_info = f"🎰 {len(real_odds)} reali" if real_odds else "📊 modello"
+                    st.toast(f"💾 {saved_count} pronostici salvati ({odds_info})!", icon="✅")
                     
         except Exception as e:
             pass  # Silenzioso se fallisce
