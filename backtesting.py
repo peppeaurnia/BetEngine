@@ -98,15 +98,40 @@ def init_predictions_table():
     
     # Aggiungi colonna archived se non esiste (per mantenere statistiche dopo eliminazione)
     try:
+        # Verifica se la colonna esiste
         cursor.execute("""
-            ALTER TABLE predictions ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_name = 'predictions' AND column_name = 'archived'
         """)
-    except:
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE predictions ADD COLUMN archived BOOLEAN DEFAULT FALSE")
+            conn.commit()
+    except Exception as e:
         pass
     
     conn.commit()
     cursor.close()
     conn.close()
+
+
+def ensure_archived_column():
+    """Assicura che la colonna archived esista nel database."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_name = 'predictions' AND column_name = 'archived'
+        """)
+        if not cursor.fetchone():
+            cursor.execute("ALTER TABLE predictions ADD COLUMN archived BOOLEAN DEFAULT FALSE")
+            conn.commit()
+    except:
+        pass
+    finally:
+        cursor.close()
+        conn.close()
 
 
 # ============================================================
@@ -971,6 +996,9 @@ def delete_all_predictions(user_id: int) -> int:
 def display_backtesting_dashboard(user_id: int, api_key: str):
     """Mostra la dashboard completa di backtesting."""
     
+    # Assicura che la colonna archived esista (migrazione database)
+    ensure_archived_column()
+    
     try:
         st.header("📊 Backtesting & Statistiche")
         
@@ -1425,6 +1453,9 @@ def display_update_tab(user_id: int, api_key: str):
 def display_manage_tab(user_id: int):
     """Tab gestione - elimina previsioni."""
     
+    # Assicura che la colonna archived esista
+    ensure_archived_column()
+    
     st.markdown("### 🗑️ Gestione Previsioni")
     
     # Carica partite
@@ -1524,6 +1555,7 @@ def init_backtesting():
     """Inizializza il sistema di backtesting."""
     try:
         init_predictions_table()
+        ensure_archived_column()  # Assicura che la colonna archived esista
         return True
     except Exception as e:
         print(f"Errore init backtesting: {e}")
