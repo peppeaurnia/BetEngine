@@ -1804,8 +1804,8 @@ if calculate_btn:
                     else:
                         market = 'Altro'
                     
-                    # Converti a float Python nativo
-                    prob_value = float(pred['prob'] / 100)
+                    # Converti a float Python nativo (IMPORTANTE: no numpy!)
+                    prob_value = float(pred['prob']) / 100.0
                     stars_value = int(pred.get('stars', 3))
                     
                     # 🎰 Usa quota REALE se disponibile, altrimenti calcola dal modello
@@ -1816,10 +1816,11 @@ if calculate_btn:
                         best_odds = float(real_odds[short_normalized])
                     else:
                         # Fallback: quota implicita dal modello (100/prob)
-                        best_odds = round(100 / max(pred['prob'], 1), 2)
+                        # IMPORTANTE: float() per evitare np.float64!
+                        best_odds = float(round(100.0 / max(float(pred['prob']), 1.0), 2))
                     
-                    # Assicurati che best_odds sia valido
-                    best_odds = max(1.01, min(best_odds, 100.0))  # Limita tra 1.01 e 100
+                    # Assicurati che best_odds sia valido (e sia float nativo!)
+                    best_odds = float(max(1.01, min(float(best_odds), 100.0)))
                     
                     try:
                         if save_prediction(
