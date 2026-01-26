@@ -818,6 +818,95 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     }
 
 
+def get_monthly_roi(user_id: int) -> List[Dict]:
+    """
+    Calcola il ROI per ogni mese.
+    
+    Returns:
+        Lista di dict con: month, year, total_bets, won, lost, roi, profit
+    """
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Prendi tutte le scommesse concluse
+    cursor.execute("""
+        SELECT 
+            EXTRACT(YEAR FROM match_date) as year,
+            EXTRACT(MONTH FROM match_date) as month,
+            is_won,
+            best_odds
+        FROM predictions
+        WHERE user_id = %s AND is_won IS NOT NULL
+        ORDER BY match_date DESC
+    """, (user_id,))
+    
+    raw_data = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    # Aggrega per mese
+    monthly_data = {}
+    stake = 10  # €10 per scommessa
+    
+    for row in raw_data:
+        key = f"{int(row['year'])}-{int(row['month']):02d}"
+        
+        if key not in monthly_data:
+            monthly_data[key] = {
+                'year': int(row['year']),
+                'month': int(row['month']),
+                'won': 0,
+                'lost': 0,
+                'staked': 0,
+                'returns': 0
+            }
+        
+        monthly_data[key]['staked'] += stake
+        
+        if row['is_won'] == 1:
+            monthly_data[key]['won'] += 1
+            odds = float(row['best_odds']) if row['best_odds'] else 1.85
+            monthly_data[key]['returns'] += stake * odds
+        else:
+            monthly_data[key]['lost'] += 1
+    
+    # Calcola ROI per ogni mese
+    result = []
+    for key in sorted(monthly_data.keys(), reverse=True):
+        data = monthly_data[key]
+        staked = data['staked']
+        returns = data['returns']
+        
+        roi = ((returns - staked) / staked * 100) if staked > 0 else 0
+        profit = returns - staked
+        total_bets = data['won'] + data['lost']
+        accuracy = (data['won'] / total_bets * 100) if total_bets > 0 else 0
+        
+        result.append({
+            'year': data['year'],
+            'month': data['month'],
+            'month_name': get_month_name(data['month']),
+            'total_bets': total_bets,
+            'won': data['won'],
+            'lost': data['lost'],
+            'accuracy': round(accuracy, 1),
+            'roi': round(roi, 1),
+            'profit': round(profit, 2)
+        })
+    
+    return result
+
+
+def get_month_name(month: int) -> str:
+    """Restituisce il nome del mese in italiano."""
+    months = {
+        1: "Gennaio", 2: "Febbraio", 3: "Marzo", 4: "Aprile",
+        5: "Maggio", 6: "Giugno", 7: "Luglio", 8: "Agosto",
+        9: "Settembre", 10: "Ottobre", 11: "Novembre", 12: "Dicembre"
+    }
+    return months.get(month, str(month))
+
+
 def get_predictions_history(
     user_id: int,
     limit: int = 50,
@@ -1115,6 +1204,63 @@ def display_statistics_tab(user_id: int):
                 """, unsafe_allow_html=True)
         else:
             st.info("Nessun dato")
+    
+    st.markdown("---")
+    
+    # ROI MENSILE
+    st.markdown("### 📅 ROI Mensile")
+    
+    monthly_stats = get_monthly_roi(user_id)
+    
+    if monthly_stats:
+        # Crea tabella
+        for month_data in monthly_stats[:12]:  # Ultimi 12 mesi
+            roi = month_data['roi']
+            profit = month_data['profit']
+            
+            # Colore in base al ROI
+            if roi > 5:
+                roi_color = "#2ecc71"  # Verde
+                emoji = "🟢"
+            elif roi > 0:
+                roi_color = "#f1c40f"  # Giallo
+                emoji = "🟡"
+            elif roi > -5:
+                roi_color = "#e67e22"  # Arancione
+                emoji = "🟠"
+            else:
+                roi_color = "#e74c3c"  # Rosso
+                emoji = "🔴"
+            
+            profit_sign = "+" if profit >= 0 else ""
+            
+            st.markdown(f"""
+            <div style="background:rgba(255,255,255,0.1); padding:12px; border-radius:8px; margin-bottom:8px;
+                        border-left:4px solid {roi_color};">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <strong style="color:#ffffff; font-size:1.1em;">
+                            {emoji} {month_data['month_name']} {month_data['year']}
+                        </strong><br>
+                        <span style="color:#a8d4f0;">
+                            🎯 {month_data['total_bets']} scommesse | 
+                            ✅ {month_data['won']} | ❌ {month_data['lost']} |
+                            Accuracy: {month_data['accuracy']}%
+                        </span>
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="color:{roi_color}; font-size:1.4em; font-weight:bold;">
+                            {roi:+.1f}%
+                        </span><br>
+                        <span style="color:#a8d4f0;">
+                            {profit_sign}€{profit:.2f}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("📭 Nessun dato mensile disponibile")
     
     st.markdown("---")
     
