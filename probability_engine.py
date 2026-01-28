@@ -21,6 +21,88 @@ from typing import Dict, Tuple, Optional
 MAX_GOALS = 10          # Massimo gol per squadra nella matrice
 SOFT_ADJ_WEIGHT = 0.30  # Peso per aggiustamenti forma/rank/momentum (aumentato)
 
+# ============================================================
+# CALIBRAZIONE PER LEGA E MERCATO (basata su dati storici)
+# ============================================================
+# Valori in percentuale: -10 significa "togli 10% alla probabilità"
+# Esempio: se modello calcola 65% e calibrazione è -10%, finale = 55%
+CALIBRATION_ADJUSTMENTS = {
+    # Premier League (39) - sovrastima molto 1X2 e Over/Under
+    39: {
+        "1X2": -10,
+        "BTTS": -5,
+        "Over/Under": -10,
+        "Cards": -5
+    },
+    # LaLiga (140) - sovrastima BTTS e Over/Under
+    140: {
+        "1X2": -7,
+        "BTTS": -10,
+        "Over/Under": -10,
+        "Cards": 0
+    },
+    # Eredivisie (88) - sovrastima tutto
+    88: {
+        "1X2": -10,
+        "BTTS": -10,
+        "Over/Under": -10,
+        "Cards": 0
+    },
+    # Bundesliga (78) - leggera sovrastima
+    78: {
+        "1X2": 0,
+        "BTTS": -7,
+        "Over/Under": -3,
+        "Cards": -7
+    },
+    # Ligue 1 (61) - sottostima BTTS e Over/Under
+    61: {
+        "1X2": -10,
+        "BTTS": +10,
+        "Over/Under": +5,
+        "Cards": -5
+    },
+    # Serie A (135) - calibrazione buona, leggero boost BTTS
+    135: {
+        "1X2": 0,
+        "BTTS": +5,
+        "Over/Under": 0,
+        "Cards": +3
+    },
+    # Primeira Liga (94) - dati insufficienti, nessun aggiustamento
+    94: {
+        "1X2": 0,
+        "BTTS": 0,
+        "Over/Under": 0,
+        "Cards": 0
+    }
+}
+
+
+def apply_calibration(prob: float, league_id: int, market: str) -> float:
+    """
+    Applica la calibrazione per lega e mercato.
+    
+    Args:
+        prob: Probabilità calcolata dal modello (0-1)
+        league_id: ID della lega
+        market: Tipo di mercato ('1X2', 'BTTS', 'Over/Under', 'Cards')
+    
+    Returns:
+        Probabilità calibrata (0-1)
+    """
+    if league_id not in CALIBRATION_ADJUSTMENTS:
+        return prob
+    
+    league_cal = CALIBRATION_ADJUSTMENTS[league_id]
+    adjustment = league_cal.get(market, 0)
+    
+    # Applica aggiustamento (in punti percentuali)
+    calibrated = prob + (adjustment / 100)
+    
+    # Clamp tra 0.01 e 0.99
+    return max(0.01, min(0.99, calibrated))
+
 # λ₃ calibrato empiricamente per ogni lega (correlazione gol)
 LEAGUE_LAMBDA3 = {
     39:  0.08,   # Premier League (partite aperte)
@@ -531,6 +613,40 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
     
     # 8. Calcola probabilità cartellini con aggiustamento arbitro
     probs_cards = calculate_cards_probabilities(home_stats, away_stats, referee_data)
+    
+    # 9. APPLICA CALIBRAZIONE per lega e mercato
+    if league_id:
+        # Calibra 1X2
+        probs_1x2["p_home"] = apply_calibration(probs_1x2["p_home"], league_id, "1X2")
+        probs_1x2["p_draw"] = apply_calibration(probs_1x2["p_draw"], league_id, "1X2")
+        probs_1x2["p_away"] = apply_calibration(probs_1x2["p_away"], league_id, "1X2")
+        
+        # Rinormalizza 1X2 (devono sommare a 1)
+        total_1x2 = probs_1x2["p_home"] + probs_1x2["p_draw"] + probs_1x2["p_away"]
+        if total_1x2 > 0:
+            probs_1x2["p_home"] /= total_1x2
+            probs_1x2["p_draw"] /= total_1x2
+            probs_1x2["p_away"] /= total_1x2
+        
+        # Calibra BTTS
+        probs_btts["p_btts_yes"] = apply_calibration(probs_btts["p_btts_yes"], league_id, "BTTS")
+        probs_btts["p_btts_no"] = 1 - probs_btts["p_btts_yes"]
+        
+        # Calibra Over/Under
+        for line in [1.5, 2.5, 3.5, 4.5]:
+            key_over = f"over_{line}"
+            key_under = f"under_{line}"
+            if key_over in probs_ou:
+                probs_ou[key_over] = apply_calibration(probs_ou[key_over], league_id, "Over/Under")
+                probs_ou[key_under] = 1 - probs_ou[key_over]
+        
+        # Calibra Cards
+        for line in [2.5, 3.5, 4.5, 5.5, 6.5]:
+            key_over = f"cards_over_{line}"
+            key_under = f"cards_under_{line}"
+            if key_over in probs_cards:
+                probs_cards[key_over] = apply_calibration(probs_cards[key_over], league_id, "Cards")
+                probs_cards[key_under] = 1 - probs_cards[key_over]
     
     return {
         # Metriche base
