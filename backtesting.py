@@ -1191,7 +1191,7 @@ def display_statistics_tab(user_id: int):
         st.markdown("### 🏆 Per Lega")
         
         if stats['by_league']:
-            for league in stats['by_league'][:5]:
+            for league in stats['by_league'][:10]:  # Mostra fino a 10 leghe
                 accuracy = league['accuracy'] or 0
                 emoji = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
                 

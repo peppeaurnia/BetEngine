@@ -15,6 +15,7 @@ LEAGUE_MAPPING = {
     140: "soccer_spain_la_liga", # La Liga
     78: "soccer_germany_bundesliga",  # Bundesliga
     61: "soccer_france_ligue_one",    # Ligue 1
+    94: "soccer_portugal_primeira_liga",  # Liga Portugal
     2: "soccer_uefa_champs_league",   # Champions League
 }
 
