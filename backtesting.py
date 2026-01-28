@@ -977,6 +977,74 @@ def get_best_predictions(user_id: int, min_prob: float = 0.55, limit: int = 20) 
     return [dict(p) for p in predictions]
 
 
+def export_predictions_to_csv(user_id: int) -> str:
+    """
+    Esporta tutte le previsioni in formato CSV per analisi.
+    """
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cursor.execute("""
+        SELECT 
+            match_date,
+            league_id,
+            league_name,
+            home_team,
+            away_team,
+            market,
+            selection,
+            predicted_prob,
+            best_odds,
+            home_goals,
+            away_goals,
+            is_won,
+            created_at
+        FROM predictions
+        WHERE user_id = %s
+        ORDER BY match_date DESC
+    """, (user_id,))
+    
+    predictions = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    if not predictions:
+        return None
+    
+    import io
+    import csv
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Header
+    writer.writerow([
+        'data_partita', 'league_id', 'lega', 'casa', 'trasferta',
+        'mercato', 'selezione', 'prob_modello', 'quota',
+        'gol_casa', 'gol_trasferta', 'vinta', 'creata_il'
+    ])
+    
+    # Righe
+    for p in predictions:
+        writer.writerow([
+            p['match_date'],
+            p['league_id'],
+            p['league_name'],
+            p['home_team'],
+            p['away_team'],
+            p['market'],
+            p['selection'],
+            round(p['predicted_prob'] * 100, 1) if p['predicted_prob'] else '',
+            p['best_odds'],
+            p['home_goals'],
+            p['away_goals'],
+            'SI' if p['is_won'] == 1 else ('NO' if p['is_won'] == 0 else ''),
+            p['created_at']
+        ])
+    
+    return output.getvalue()
+
+
 # ============================================================
 # UI STREAMLIT
 # ============================================================
@@ -1294,7 +1362,7 @@ def display_history_tab(user_id: int):
         only_settled = st.checkbox("Solo concluse", value=False, key="history_settled")
     
     with col3:
-        limit = st.selectbox("Mostra", [20, 50, 100], index=0, key="history_limit")
+        limit = st.selectbox("Mostra", [20, 50, 100, 500], index=0, key="history_limit")
     
     # Carica storico
     market = market_filter if market_filter != "Tutti" else None
@@ -1304,7 +1372,25 @@ def display_history_tab(user_id: int):
         st.info("📭 Nessuna previsione trovata")
         return
     
-    st.markdown(f"### 📋 Ultime {len(history)} Previsioni")
+    # EXPORT CSV
+    st.markdown("---")
+    col_exp1, col_exp2 = st.columns([3, 1])
+    
+    with col_exp1:
+        st.markdown(f"### 📋 Ultime {len(history)} Previsioni")
+    
+    with col_exp2:
+        # Prepara CSV
+        import io
+        csv_data = export_predictions_to_csv(user_id)
+        if csv_data:
+            st.download_button(
+                label="📥 Esporta CSV",
+                data=csv_data,
+                file_name="betengine_predictions.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
     
     # Mostra previsioni
     for pred in history:
