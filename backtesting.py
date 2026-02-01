@@ -847,23 +847,15 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     total_won = general["won"] or 0
     accuracy = (total_won / total_settled * 100) if total_settled > 0 else 0
     
-    # ROI con KELLY CRITERION (stake dinamico €10-30)
+    # ROI con STAKE FISSO €10
     total_staked = 0
     total_return = 0
+    stake = 10  # €10 fisso per ogni scommessa
     
     for bet in settled_bets:
-        # Calcola stake con Kelly
-        prob = float(bet["predicted_prob"]) if bet["predicted_prob"] else 0.55
-        odds = float(bet["best_odds"]) if bet["best_odds"] else 1.85
-        
-        stake = kelly_stake(prob, odds)
-        
-        # Se no value (stake = 0), usa minimo €10 per il calcolo storico
-        if stake == 0:
-            stake = 10
-        
         total_staked += stake
         if bet["is_won"] == 1:
+            odds = float(bet["best_odds"]) if bet["best_odds"] else 1.85
             total_return += stake * odds
     
     roi = ((total_return - total_staked) / total_staked * 100) if total_staked > 0 else 0
@@ -882,7 +874,7 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
 
 def get_monthly_roi(user_id: int) -> List[Dict]:
     """
-    Calcola il ROI per ogni mese con Kelly Criterion.
+    Calcola il ROI per ogni mese con stake fisso €10.
     
     Returns:
         Lista di dict con: month, year, total_bets, won, lost, roi, profit
@@ -890,14 +882,13 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    # Prendi tutte le scommesse concluse (inclusa predicted_prob per Kelly)
+    # Prendi tutte le scommesse concluse
     cursor.execute("""
         SELECT 
             EXTRACT(YEAR FROM match_date) as year,
             EXTRACT(MONTH FROM match_date) as month,
             is_won,
-            best_odds,
-            predicted_prob
+            best_odds
         FROM predictions
         WHERE user_id = %s AND is_won IS NOT NULL
         ORDER BY match_date DESC
@@ -907,8 +898,9 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
     cursor.close()
     conn.close()
     
-    # Aggrega per mese con Kelly Criterion
+    # Aggrega per mese con stake fisso €10
     monthly_data = {}
+    stake = 10  # €10 fisso per ogni scommessa
     
     for row in raw_data:
         key = f"{int(row['year'])}-{int(row['month']):02d}"
@@ -923,19 +915,11 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
                 'returns': 0
             }
         
-        # Calcola stake con Kelly
-        prob = float(row['predicted_prob']) if row['predicted_prob'] else 0.55
-        odds = float(row['best_odds']) if row['best_odds'] else 1.85
-        stake = kelly_stake(prob, odds)
-        
-        # Se no value, usa minimo €10
-        if stake == 0:
-            stake = 10
-        
         monthly_data[key]['staked'] += stake
         
         if row['is_won'] == 1:
             monthly_data[key]['won'] += 1
+            odds = float(row['best_odds']) if row['best_odds'] else 1.85
             monthly_data[key]['returns'] += stake * odds
         else:
             monthly_data[key]['lost'] += 1
