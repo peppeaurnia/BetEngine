@@ -1381,8 +1381,8 @@ def calculate_top_predictions(probabilities: dict, home_team: str, away_team: st
         else:
             pred['stars'] = 1
     
-    # Filtra solo probabilità > 50% e ordina per probabilità
-    valid_predictions = [p for p in predictions if p['prob'] > 50]
+    # Filtra solo probabilità >= 70% e ordina per probabilità
+    valid_predictions = [p for p in predictions if p['prob'] >= 70]
     valid_predictions.sort(key=lambda x: x['prob'], reverse=True)
     
     return valid_predictions[:3]
@@ -1394,7 +1394,7 @@ def display_top_predictions(predictions: list) -> None:
     st.subheader("🏆 Pronostici Consigliati")
     
     if not predictions:
-        st.info("Nessun pronostico con confidence sufficiente")
+        st.info("⚠️ Nessun pronostico con probabilità ≥70%. Partita troppo incerta.")
         return
     
     medals = ['🥇', '🥈', '🥉']
