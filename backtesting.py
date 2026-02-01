@@ -1204,6 +1204,33 @@ def delete_all_predictions(user_id: int) -> int:
         conn.close()
 
 
+def hard_delete_all_predictions(user_id: int) -> int:
+    """
+    Elimina DEFINITIVAMENTE tutte le previsioni di un utente.
+    Cancella tutto dal database, incluse le archiviate.
+    ⚠️ IRREVERSIBILE - Le statistiche andranno perse!
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            DELETE FROM predictions 
+            WHERE user_id = %s
+        """, (user_id,))
+        deleted = cursor.rowcount
+        
+        conn.commit()
+        return deleted
+    except Exception as e:
+        conn.rollback()
+        print(f"Errore hard delete: {e}")
+        return 0
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def display_backtesting_dashboard(user_id: int, api_key: str):
     """Mostra la dashboard completa di backtesting."""
     
@@ -1813,7 +1840,7 @@ def display_manage_tab(user_id: int):
     
     st.markdown("""
     <p style="color:#f39c12;">
-    📊 <strong>Nota:</strong> Le previsioni già calcolate verranno archiviate, non eliminate.
+    📊 <strong>Archivia:</strong> Le previsioni già calcolate verranno archiviate, non eliminate.
     Le statistiche (accuracy, ROI, vincite/perdite) saranno mantenute!
     </p>
     """, unsafe_allow_html=True)
@@ -1821,16 +1848,39 @@ def display_manage_tab(user_id: int):
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        confirm = st.checkbox("✅ Confermo di voler eliminare/archiviare TUTTE le previsioni", key="confirm_delete_all")
+        confirm = st.checkbox("✅ Confermo di voler archiviare le previsioni", key="confirm_delete_all")
     
     with col2:
-        if st.button("🗑️ ELIMINA TUTTO", type="primary", disabled=not confirm):
+        if st.button("📦 ARCHIVIA TUTTO", type="secondary", disabled=not confirm):
             deleted = delete_all_predictions(user_id)
             if deleted > 0:
-                st.success(f"✅ Eliminate {deleted} previsioni!")
+                st.success(f"✅ Archiviate {deleted} previsioni!")
                 st.rerun()
             else:
-                st.info("Nessuna previsione da eliminare")
+                st.info("Nessuna previsione da archiviare")
+    
+    # Hard delete - cancella TUTTO definitivamente
+    st.markdown("---")
+    st.markdown("""
+    <p style="color:#e74c3c;">
+    🗑️ <strong>CANCELLA DEFINITIVAMENTE:</strong> Elimina TUTTE le previsioni dal database.
+    ⚠️ <strong>IRREVERSIBILE!</strong> Tutte le statistiche andranno perse!
+    </p>
+    """, unsafe_allow_html=True)
+    
+    col3, col4 = st.columns([3, 1])
+    
+    with col3:
+        confirm_hard = st.checkbox("⚠️ Confermo di voler CANCELLARE TUTTO DEFINITIVAMENTE", key="confirm_hard_delete")
+    
+    with col4:
+        if st.button("🗑️ CANCELLA TUTTO", type="primary", disabled=not confirm_hard):
+            deleted = hard_delete_all_predictions(user_id)
+            if deleted > 0:
+                st.success(f"🗑️ Cancellate definitivamente {deleted} previsioni!")
+                st.rerun()
+            else:
+                st.info("Nessuna previsione da cancellare")
 
 
 # ============================================================
