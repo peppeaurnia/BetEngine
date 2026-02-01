@@ -22,86 +22,69 @@ MAX_GOALS = 10          # Massimo gol per squadra nella matrice
 SOFT_ADJ_WEIGHT = 0.30  # Peso per aggiustamenti forma/rank/momentum (aumentato)
 
 # ============================================================
-# CALIBRAZIONE PER LEGA E MERCATO (basata su dati storici)
+# CALIBRAZIONE INTELLIGENTE (basata su 356 scommesse storiche)
 # ============================================================
-# Valori in percentuale: -10 significa "togli 10% alla probabilità"
-# Esempio: se modello calcola 65% e calibrazione è -10%, finale = 55%
-CALIBRATION_ADJUSTMENTS = {
-    # Premier League (39) - sovrastima molto 1X2 e Over/Under
-    39: {
-        "1X2": -10,
-        "BTTS": -5,
-        "Over/Under": -10,
-        "Cards": -5
-    },
-    # LaLiga (140) - sovrastima BTTS e Over/Under
-    140: {
-        "1X2": -7,
-        "BTTS": -10,
-        "Over/Under": -10,
-        "Cards": 0
-    },
-    # Eredivisie (88) - sovrastima tutto
-    88: {
-        "1X2": -10,
-        "BTTS": -10,
-        "Over/Under": -10,
-        "Cards": 0
-    },
-    # Bundesliga (78) - leggera sovrastima
-    78: {
-        "1X2": 0,
-        "BTTS": -7,
-        "Over/Under": -3,
-        "Cards": -7
-    },
-    # Ligue 1 (61) - sottostima BTTS e Over/Under
-    61: {
-        "1X2": -10,
-        "BTTS": +10,
-        "Over/Under": +5,
-        "Cards": -5
-    },
-    # Serie A (135) - calibrazione buona, leggero boost BTTS
-    135: {
-        "1X2": 0,
-        "BTTS": +5,
-        "Over/Under": 0,
-        "Cards": +3
-    },
-    # Primeira Liga (94) - dati insufficienti, nessun aggiustamento
-    94: {
-        "1X2": 0,
-        "BTTS": 0,
-        "Over/Under": 0,
-        "Cards": 0
-    }
-}
-
+# Il modello sovrastima le probabilità alte. Questa calibrazione:
+# 1. Applica SHRINKAGE non lineare (schiaccia le % alte verso valori realistici)
+# 2. Applica correzione specifica per MERCATO
 
 def apply_calibration(prob: float, league_id: int, market: str) -> float:
     """
-    Applica la calibrazione per lega e mercato.
+    Calibrazione intelligente delle probabilità.
+    
+    Problema risolto: il modello prevedeva 80%+ ma vinceva solo 50-60%.
+    Soluzione: shrinkage non lineare + correzione per mercato.
     
     Args:
         prob: Probabilità calcolata dal modello (0-1)
-        league_id: ID della lega
+        league_id: ID della lega (non usato nella nuova versione)
         market: Tipo di mercato ('1X2', 'BTTS', 'Over/Under', 'Cards')
     
     Returns:
         Probabilità calibrata (0-1)
     """
-    if league_id not in CALIBRATION_ADJUSTMENTS:
-        return prob
+    # Converti in percentuale per i calcoli
+    prob_pct = prob * 100
     
-    league_cal = CALIBRATION_ADJUSTMENTS[league_id]
-    adjustment = league_cal.get(market, 0)
+    # === STEP 1: SHRINKAGE NON LINEARE ===
+    # Schiaccia le probabilità alte verso valori più realistici
+    if prob_pct <= 70:
+        # Sotto 70%: nessuna modifica
+        base = prob_pct
+    elif prob_pct <= 80:
+        # 70-80%: riduzione moderata (80% -> 76%)
+        base = 70 + (prob_pct - 70) * 0.6
+    elif prob_pct <= 90:
+        # 80-90%: riduzione forte (90% -> 80%)
+        base = 76 + (prob_pct - 80) * 0.4
+    else:
+        # 90%+: riduzione molto forte (95% -> 81%, 100% -> 82%)
+        base = 80 + (prob_pct - 90) * 0.2
     
-    # Applica aggiustamento (in punti percentuali)
-    calibrated = prob + (adjustment / 100)
+    # === STEP 2: CORREZIONE PER MERCATO ===
+    if market == '1X2':
+        # 1X2 sovrastima molto sulle alte (+22% errore medio)
+        if prob_pct > 75:
+            calibrated = base - 5
+        else:
+            calibrated = base
+    elif market == 'BTTS':
+        # BTTS sovrastima sempre (+17% errore medio)
+        calibrated = base - 12
+    elif market == 'Over/Under':
+        # Over/Under sovrastima (+15% errore medio)
+        calibrated = base - 8
+    elif market == 'Cards':
+        # Cards è già buono (+5% errore medio)
+        calibrated = base - 2
+    else:
+        calibrated = base
     
-    # Clamp tra 0.01 e 0.99
-    return max(0.01, min(0.99, calibrated))
+    # Minimo 50% (non proponiamo sotto questa soglia comunque)
+    calibrated = max(50, calibrated)
+    
+    # Converti in decimale e clamp
+    return max(0.01, min(0.99, calibrated / 100))
 
 # λ₃ calibrato empiricamente per ogni lega (correlazione gol)
 LEAGUE_LAMBDA3 = {
