@@ -488,6 +488,65 @@ def calculate_confidence(home_stats: Dict, away_stats: Dict,
     }
 
 
+def assess_prediction_quality(home_stats: Dict, away_stats: Dict) -> Dict:
+    """
+    Valuta la qualità/affidabilità della previsione basandosi
+    sulla completezza dei dati disponibili.
+    
+    Usata da app.py per mostrare l'indicatore di affidabilità.
+    
+    Returns:
+        Dict con score (0-100), level, message, issues
+    """
+    score = 100
+    issues = []
+    
+    # Check dati casa
+    if home_stats.get("attack_home") in [None, 1.0]:
+        score -= 15
+        issues.append("Dati attacco casa incompleti")
+    if home_stats.get("defense_home") in [None, 1.0]:
+        score -= 15
+        issues.append("Dati difesa casa incompleti")
+    if home_stats.get("form_factor") in [None, 1.0]:
+        score -= 5
+        issues.append("Form casa non disponibile")
+    
+    # Check dati trasferta
+    if away_stats.get("attack_away") in [None, 1.0]:
+        score -= 15
+        issues.append("Dati attacco trasferta incompleti")
+    if away_stats.get("defense_away") in [None, 1.0]:
+        score -= 15
+        issues.append("Dati difesa trasferta incompleti")
+    if away_stats.get("form_factor") in [None, 1.0]:
+        score -= 5
+        issues.append("Form trasferta non disponibile")
+    
+    # Check medie lega
+    if home_stats.get("league_avg_gf_home") is None:
+        score -= 10
+        issues.append("Medie lega non disponibili")
+    
+    # Determina livello
+    if score >= 85:
+        level = "🟢 Alta"
+        message = "Dati completi e affidabili"
+    elif score >= 65:
+        level = "🟡 Media"
+        message = "Alcuni dati mancanti"
+    else:
+        level = "🔴 Bassa"
+        message = "Molti dati mancanti - previsione meno affidabile"
+    
+    return {
+        "score": max(score, 0),
+        "level": level,
+        "message": message,
+        "issues": issues
+    }
+
+
 # ============================================================
 # H2H ADJUSTMENT
 # ============================================================
