@@ -36,7 +36,9 @@ EXCLUDED_LEAGUES = [
 ]
 
 def is_league_excluded(league_name: str) -> bool:
-    """Controlla se una lega è nella lista esclusa."""
+    """Controlla se una lega è nella lista esclusa.
+    Gestisce tutti i formati: 'Eredivisie', 'NL Eredivisie', 'Primeira Liga', etc.
+    """
     if not league_name:
         return False
     name_lower = league_name.lower().strip()
@@ -1406,7 +1408,9 @@ def display_statistics_tab(user_id: int):
         if stats['by_league']:
             for league in stats['by_league'][:10]:  # Mostra fino a 10 leghe
                 accuracy = league['accuracy'] or 0
-                is_excluded = league.get('excluded', False)
+                
+                # Check esclusione lato Python (più affidabile del booleano SQL)
+                is_excluded = is_league_excluded(league.get('league_name', ''))
                 
                 if is_excluded:
                     emoji = "⛔"
