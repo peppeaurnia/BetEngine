@@ -21,6 +21,27 @@ import traceback
 # Import configurazione database
 from database import get_connection
 
+# ============================================================
+# LEGHE ESCLUSE DAL BACKTESTING
+# ============================================================
+# Queste leghe NON vengono conteggiate nelle statistiche e nel ROI
+# perché il modello è troppo poco preciso su di esse.
+# I pronostici vengono comunque salvati, ma ignorati nei calcoli.
+#
+# Per aggiungere/rimuovere leghe, modifica questa lista.
+# Usa i nomi ESATTI come appaiono nel database (case-insensitive).
+EXCLUDED_LEAGUES = [
+    "eredivisie",
+    "primeira liga",
+]
+
+def is_league_excluded(league_name: str) -> bool:
+    """Controlla se una lega è nella lista esclusa."""
+    if not league_name:
+        return False
+    name_lower = league_name.lower().strip()
+    return any(excl in name_lower for excl in EXCLUDED_LEAGUES)
+
 
 # ============================================================
 # KELLY CRITERION - CALCOLO STAKE DINAMICO
@@ -755,7 +776,7 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     
     date_limit = datetime.now() - timedelta(days=days)
     
-    # Statistiche generali
+    # Statistiche generali (ESCLUSE leghe non affidabili)
     cursor.execute("""
         SELECT 
             COUNT(*) as total_predictions,
@@ -766,11 +787,13 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
             COUNT(CASE WHEN is_won IS NULL AND match_date >= CURRENT_DATE THEN 1 END) as pending_match
         FROM predictions
         WHERE user_id = %s AND created_at >= %s
+        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
+        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
     """, (user_id, date_limit))
     
     general = cursor.fetchone()
     
-    # Statistiche per mercato
+    # Statistiche per mercato (ESCLUSE leghe non affidabili)
     cursor.execute("""
         SELECT 
             market,
@@ -785,13 +808,15 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
             ) as accuracy
         FROM predictions
         WHERE user_id = %s AND created_at >= %s
+        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
+        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
         GROUP BY market
         ORDER BY accuracy DESC
     """, (user_id, date_limit))
     
     by_market = cursor.fetchall()
     
-    # Statistiche per lega
+    # Statistiche per lega (mostra tutte, ma marca quelle escluse)
     cursor.execute("""
         SELECT 
             league_name,
@@ -802,7 +827,13 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
                 THEN COUNT(CASE WHEN is_won = 1 THEN 1 END)::decimal / 
                      COUNT(CASE WHEN is_won IS NOT NULL THEN 1 END) * 100
                 ELSE 0 END, 1
-            ) as accuracy
+            ) as accuracy,
+            CASE 
+                WHEN LOWER(league_name) LIKE '%%eredivisie%%' 
+                  OR LOWER(league_name) LIKE '%%primeira liga%%' 
+                THEN TRUE 
+                ELSE FALSE 
+            END as excluded
         FROM predictions
         WHERE user_id = %s AND created_at >= %s
         GROUP BY league_name
@@ -812,7 +843,7 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     
     by_league = cursor.fetchall()
     
-    # Trend ultimi 7 giorni
+    # Trend ultimi 7 giorni (ESCLUSE leghe non affidabili)
     cursor.execute("""
         SELECT 
             match_date,
@@ -822,18 +853,22 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
         WHERE user_id = %s 
         AND match_date >= CURRENT_DATE - INTERVAL '7 days'
         AND is_won IS NOT NULL
+        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
+        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
         GROUP BY match_date
         ORDER BY match_date
     """, (user_id,))
     
     daily_trend = cursor.fetchall()
     
-    # Calcola ROI con quote REALI e KELLY CRITERION
+    # Calcola ROI con quote REALI e KELLY CRITERION (ESCLUSE leghe non affidabili)
     cursor2 = conn.cursor(cursor_factory=RealDictCursor)
     cursor2.execute("""
         SELECT is_won, best_odds, predicted_prob
         FROM predictions
         WHERE user_id = %s AND created_at >= %s AND is_won IS NOT NULL
+        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
+        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
     """, (user_id, date_limit))
     
     settled_bets = cursor2.fetchall()
@@ -847,7 +882,7 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     total_won = general["won"] or 0
     accuracy = (total_won / total_settled * 100) if total_settled > 0 else 0
     
-    # ROI con STAKE FISSO €10
+    # ROI con STAKE FISSO €10 + YIELD
     total_staked = 0
     total_return = 0
     stake = 10  # €10 fisso per ogni scommessa
@@ -861,6 +896,11 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     roi = ((total_return - total_staked) / total_staked * 100) if total_staked > 0 else 0
     profit = total_return - total_staked
     
+    # Indicatore affidabilità statistica
+    min_sample = 50  # Minimo per significatività
+    sample_size = total_settled
+    is_reliable = sample_size >= min_sample
+    
     return {
         "general": dict(general),
         "accuracy": round(accuracy, 1),
@@ -868,7 +908,10 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
         "profit": round(profit, 2),
         "by_market": [dict(m) for m in by_market],
         "by_league": [dict(l) for l in by_league],
-        "daily_trend": [dict(d) for d in daily_trend]
+        "daily_trend": [dict(d) for d in daily_trend],
+        "is_reliable": is_reliable,
+        "sample_size": sample_size,
+        "min_sample": min_sample
     }
 
 
@@ -882,7 +925,7 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    # Prendi tutte le scommesse concluse
+    # Prendi tutte le scommesse concluse (ESCLUSE leghe non affidabili)
     cursor.execute("""
         SELECT 
             EXTRACT(YEAR FROM match_date) as year,
@@ -891,6 +934,8 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
             best_odds
         FROM predictions
         WHERE user_id = %s AND is_won IS NOT NULL
+        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
+        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
         ORDER BY match_date DESC
     """, (user_id,))
     
@@ -1296,8 +1341,26 @@ def display_statistics_tab(user_id: int):
         st.info("📭 Nessuna previsione salvata. Calcola qualche partita per iniziare!")
         return
     
+    # Nota leghe escluse
+    st.caption("⛔ Eredivisie e Primeira Liga escluse dal conteggio (modello poco preciso)")
+    
     # KPI principali
     st.markdown("### 📊 Performance Generale")
+    
+    # Avviso campione statistico
+    if not stats.get('is_reliable', True):
+        sample = stats.get('sample_size', 0)
+        needed = stats.get('min_sample', 50)
+        st.markdown(f"""
+        <div style="background:rgba(243, 156, 18, 0.3); border-left:4px solid #f39c12; 
+                    padding:12px; border-radius:8px; margin-bottom:16px;">
+            <strong style="color:#f39c12;">⚠️ Campione troppo piccolo ({sample}/{needed} bet minime)</strong><br>
+            <span style="color:#a8d4f0;">
+                Le statistiche con meno di {needed} scommesse concluse non sono affidabili. 
+                Accuracy e ROI possono variare molto. Aspetta qualche giornata prima di trarre conclusioni.
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
     
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     
@@ -1305,7 +1368,8 @@ def display_statistics_tab(user_id: int):
         st.metric("🎯 Accuracy", f"{stats['accuracy']}%")
     
     with kpi2:
-        st.metric("📈 ROI", f"{stats['roi']:+.1f}%", delta=f"€{stats['profit']:+.2f}")
+        roi_label = "📈 Yield" if stats.get('is_reliable', True) else "📈 Yield ⚠️"
+        st.metric(roi_label, f"{stats['roi']:+.1f}%", delta=f"€{stats['profit']:+.2f}")
     
     with kpi3:
         st.metric("✅ Vinte", stats['general']['won'])
@@ -1342,11 +1406,20 @@ def display_statistics_tab(user_id: int):
         if stats['by_league']:
             for league in stats['by_league'][:10]:  # Mostra fino a 10 leghe
                 accuracy = league['accuracy'] or 0
-                emoji = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
+                is_excluded = league.get('excluded', False)
+                
+                if is_excluded:
+                    emoji = "⛔"
+                    badge = ' <span style="background:#e74c3c; color:white; padding:2px 6px; border-radius:4px; font-size:0.7em;">ESCLUSA DAL ROI</span>'
+                    opacity = "0.5"
+                else:
+                    emoji = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
+                    badge = ""
+                    opacity = "1.0"
                 
                 st.markdown(f"""
-                <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:8px; margin-bottom:8px;">
-                    <strong style="color:#ffffff;">{emoji} {league['league_name']}</strong><br>
+                <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:8px; margin-bottom:8px; opacity:{opacity};">
+                    <strong style="color:#ffffff;">{emoji} {league['league_name']}</strong>{badge}<br>
                     <span style="color:#a8d4f0;">Totale: {league['total']}</span><br>
                     <span style="color:#4fc3f7; font-size:1.2em;"><strong>{accuracy}%</strong></span>
                 </div>
@@ -1356,8 +1429,8 @@ def display_statistics_tab(user_id: int):
     
     st.markdown("---")
     
-    # ROI MENSILE
-    st.markdown("### 📅 ROI Mensile")
+    # YIELD MENSILE
+    st.markdown("### 📅 Yield Mensile")
     
     monthly_stats = get_monthly_roi(user_id)
     
