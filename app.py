@@ -1285,14 +1285,19 @@ def display_team_stats(stats: dict, team_name: str, is_home: bool) -> None:
     """, unsafe_allow_html=True)
 
 
-def calculate_top_predictions(probabilities: dict, home_team: str, away_team: str) -> list:
+def calculate_top_predictions(probabilities: dict, home_team: str, away_team: str, odds_data: dict = None) -> list:
     """
-    Calcola i top 3 pronostici tra:
-    - 1X2
-    - BTTS (Gol/NoGol)
-    - Over/Under 2.5 gol
-    - Cartellini Over/Under 2.5
-    Ordinati per probabilità più alta.
+    Calcola i top 3 pronostici con EV POSITIVO.
+    
+    Solo i pronostici dove: EV = (prob_modello × quota) - 1 > 0
+    vengono consigliati. Se non ci sono quote reali, usa la probabilità
+    come fallback ma segnala che manca la verifica EV.
+    
+    Args:
+        probabilities: Dict con tutte le probabilità calcolate
+        home_team: Nome squadra casa
+        away_team: Nome squadra trasferta
+        odds_data: Dict con quote reali {selection: odds} da The Odds API
     """
     predictions = []
     
@@ -1366,35 +1371,57 @@ def calculate_top_predictions(probabilities: dict, home_team: str, away_team: st
             'icon': '🟨⬇️'
         })
     
-    # === ORDINA PER PROBABILITÀ E CALCOLA STELLE ===
+    # === CALCOLA EV E FILTRA ===
+    has_real_odds = odds_data and len(odds_data) > 0
+    
     for pred in predictions:
-        prob = pred['prob']
-        # Stelle basate sulla probabilità (semplice)
-        if prob >= 70:
-            pred['stars'] = 5
-        elif prob >= 60:
-            pred['stars'] = 4
-        elif prob >= 55:
-            pred['stars'] = 3
-        elif prob >= 50:
-            pred['stars'] = 2
+        prob_dec = pred['prob'] / 100.0  # Probabilità decimale (0-1)
+        short = pred['short'].replace(" ", "")
+        
+        if has_real_odds and short in odds_data:
+            # Quota REALE dal bookmaker
+            pred['odds'] = float(odds_data[short])
+            pred['odds_source'] = 'real'
         else:
+            # Nessuna quota reale → calcola quota implicita
+            pred['odds'] = round(1.0 / max(prob_dec, 0.01), 2) if prob_dec > 0 else 100.0
+            pred['odds_source'] = 'model'
+        
+        # EV = (probabilità modello × quota) - 1
+        pred['ev'] = prob_dec * pred['odds'] - 1.0
+        pred['ev_pct'] = pred['ev'] * 100  # In percentuale
+        
+        # Stelle basate sull'EV (non più sulla probabilità)
+        ev_pct = pred['ev_pct']
+        if ev_pct >= 15:
+            pred['stars'] = 5
+        elif ev_pct >= 10:
+            pred['stars'] = 4
+        elif ev_pct >= 5:
+            pred['stars'] = 3
+        elif ev_pct >= 2:
+            pred['stars'] = 2
+        elif ev_pct > 0:
             pred['stars'] = 1
+        else:
+            pred['stars'] = 0
     
-    # Filtra solo probabilità >= 60% e ordina per probabilità
-    valid_predictions = [p for p in predictions if p['prob'] >= 60]
-    valid_predictions.sort(key=lambda x: x['prob'], reverse=True)
+    # FILTRO: solo EV > 0 (value bets)
+    value_predictions = [p for p in predictions if p['ev'] > 0]
     
-    return valid_predictions[:3]
+    # Ordina per EV decrescente (il pronostico con più valore prima)
+    value_predictions.sort(key=lambda x: x['ev'], reverse=True)
+    
+    return value_predictions[:3]
 
 
 def display_top_predictions(predictions: list) -> None:
-    """Visualizza i top 3 pronostici consigliati."""
+    """Visualizza i top 3 pronostici consigliati (solo EV+)."""
     
     st.subheader("🏆 Pronostici Consigliati")
     
     if not predictions:
-        st.info("⚠️ Nessun pronostico con probabilità ≥60%. Partita troppo incerta.")
+        st.info("⚠️ Nessun pronostico con EV positivo. Il bookmaker offre quote troppo basse per questa partita.")
         return
     
     medals = ['🥇', '🥈', '🥉']
@@ -1415,7 +1442,20 @@ def display_top_predictions(predictions: list) -> None:
         pred = predictions[i]
         with cols[i]:
             stars = '⭐' * pred['stars'] + '☆' * (5 - pred['stars'])
-            confidence_text = "Molto Alta" if pred['stars'] >= 5 else "Alta" if pred['stars'] >= 4 else "Media-Alta" if pred['stars'] >= 3 else "Media"
+            
+            ev_pct = pred.get('ev_pct', 0)
+            if ev_pct >= 10:
+                ev_color = "#2ecc71"
+                value_label = "STRONG VALUE"
+            elif ev_pct >= 5:
+                ev_color = "#27ae60"
+                value_label = "VALUE"
+            else:
+                ev_color = "#f1c40f"
+                value_label = "EDGE"
+            
+            odds = pred.get('odds', 0)
+            odds_icon = "🎰" if pred.get('odds_source') == 'real' else "📊"
             
             st.markdown(f"""
             <div style="background: linear-gradient(135deg, {colors[i]}22, {colors[i]}44); 
@@ -1423,7 +1463,7 @@ def display_top_predictions(predictions: list) -> None:
                         border-radius: 15px; 
                         padding: 15px; 
                         text-align: center;
-                        min-height: 150px;">
+                        min-height: 180px;">
                 <div style="font-size: 1.8rem;">{medals[i]}</div>
                 <div style="font-size: 0.9rem; font-weight: bold; color: #e8f4fc; margin: 8px 0;">
                     {pred['icon']} {pred['name']}
@@ -1431,11 +1471,15 @@ def display_top_predictions(predictions: list) -> None:
                 <div style="font-size: 1.5rem; font-weight: bold; color: #4fc3f7;">
                     {pred['prob']:.1f}%
                 </div>
+                <div style="font-size: 0.85rem; color: #a8d4f0; margin: 4px 0;">
+                    {odds_icon} Quota: <strong>{odds:.2f}</strong>
+                </div>
+                <div style="background:{ev_color}; color:white; display:inline-block; 
+                            padding:3px 10px; border-radius:10px; font-size:0.8rem; font-weight:bold; margin:4px 0;">
+                    EV: +{ev_pct:.1f}% — {value_label}
+                </div>
                 <div style="font-size: 0.8rem; color: #ffd700; margin: 4px 0;">
                     {stars}
-                </div>
-                <div style="font-size: 0.7rem; color: #a8d4f0;">
-                    {confidence_text}
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -1760,8 +1804,16 @@ if calculate_btn:
     
     st.markdown("---")
     
-    # === PRONOSTICI CONSIGLIATI ===
-    top_predictions = calculate_top_predictions(probabilities, home_team_name, away_team_name)
+    # === RECUPERA QUOTE REALI (prima dei pronostici per calcolare EV) ===
+    real_odds = {}
+    if ODDS_API_AVAILABLE:
+        try:
+            real_odds = fetch_match_odds(home_team_name, away_team_name, selected_league_id)
+        except:
+            pass
+    
+    # === PRONOSTICI CONSIGLIATI (solo EV+) ===
+    top_predictions = calculate_top_predictions(probabilities, home_team_name, away_team_name, odds_data=real_odds)
     display_top_predictions(top_predictions)
     
     # === SALVATAGGIO SOLO TOP PREDICTIONS (BACKTESTING) ===
@@ -1778,13 +1830,7 @@ if calculate_btn:
                 # Match ID semplice (non più usato per aggiornamenti, solo come riferimento)
                 match_id = hash(f"{home_team_name}_{away_team_name}_{match_date}") % 10000000
                 
-                # 🎰 Recupera quote REALI da The Odds API (una volta per partita)
-                real_odds = {}
-                if ODDS_API_AVAILABLE:
-                    try:
-                        real_odds = fetch_match_odds(home_team_name, away_team_name, selected_league_id)
-                    except:
-                        pass
+                # Quote già recuperate sopra (real_odds)
                 
                 saved_count = 0
                 failed_count = 0
@@ -1808,19 +1854,12 @@ if calculate_btn:
                     prob_value = float(pred['prob']) / 100.0
                     stars_value = int(pred.get('stars', 3))
                     
-                    # 🎰 Usa quota REALE se disponibile, altrimenti calcola dal modello
-                    # Normalizza short per matching (rimuovi spazi)
-                    short_normalized = short.replace(" ", "")
-                    
-                    if short_normalized in real_odds:
-                        best_odds = float(real_odds[short_normalized])
-                    else:
-                        # Fallback: quota implicita dal modello (100/prob)
-                        # IMPORTANTE: float() per evitare np.float64!
-                        best_odds = float(round(100.0 / max(float(pred['prob']), 1.0), 2))
-                    
-                    # Assicurati che best_odds sia valido (e sia float nativo!)
+                    # Usa quota già calcolata nel pred (real o model)
+                    best_odds = float(pred.get('odds', 1.01))
                     best_odds = float(max(1.01, min(float(best_odds), 100.0)))
+                    
+                    # EV già calcolato
+                    ev_value = float(pred.get('ev', 0))
                     
                     try:
                         if save_prediction(
@@ -1835,6 +1874,7 @@ if calculate_btn:
                             selection=short,
                             predicted_prob=prob_value,
                             best_odds=best_odds,
+                            expected_value=ev_value,
                             confidence_stars=stars_value
                         ):
                             saved_count += 1
