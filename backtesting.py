@@ -1901,7 +1901,7 @@ def display_update_tab(user_id: int, api_key: str):
     conn.close()
     
     if pending:
-        st.markdown(f"**Trovate {len(pending)} partite senza risultato:**")
+        st.markdown(f"<span style='color:#ffffff;'>**Trovate {len(pending)} partite senza risultato:**</span>", unsafe_allow_html=True)
         for match in pending:
             date_str = match['match_date'].strftime("%d/%m/%Y") if match['match_date'] else "N/A"
             is_past = match['match_date'] < db_time['today'] if match['match_date'] else False
@@ -1910,7 +1910,7 @@ def display_update_tab(user_id: int, api_key: str):
             <div style="background:rgba(243, 156, 18, 0.2); border-left:4px solid #f39c12; 
                         padding:10px; border-radius:8px; margin-bottom:8px;">
                 <span style="color:#ffffff;">{status_icon} <strong>{match['home_team']} vs {match['away_team']}</strong></span><br>
-                <span style="color:#a8d4f0;">📅 {date_str} | 🏆 {match['league_name']} | ID: {match['match_id']}</span>
+                <span style="color:#d0d0d0;">📅 {date_str} | 🏆 {match['league_name']} | ID: {match['match_id']}</span>
             </div>
             """, unsafe_allow_html=True)
     else:

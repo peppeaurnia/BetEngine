@@ -2083,7 +2083,7 @@ if calculate_btn:
     
     # === HEAT MAP RISULTATI ESATTI ===
     st.subheader("🎯 Heat Map Probabili Risultati Esatti")
-    st.markdown("*Visualizza la distribuzione delle probabilità per ogni possibile risultato finale*")
+    st.markdown("<span style='color:#ffffff;'>*Visualizza la distribuzione delle probabilità per ogni possibile risultato finale*</span>", unsafe_allow_html=True)
     
     fig_matrix = create_score_matrix_heatmap(
         probabilities['matrix'], 
@@ -2206,7 +2206,7 @@ if calculate_btn:
         with h2h_col4:
             st.metric(f"Vinte {away_display}", h2h_data["team2_wins"])
         
-        st.write(f"**Media gol negli scontri diretti:** {h2h_data['avg_goals']}")
+        st.markdown(f"<span style='color:#ffffff;'>**Media gol negli scontri diretti:** {h2h_data['avg_goals']}</span>", unsafe_allow_html=True)
     else:
         st.info("Nessuno scontro diretto trovato negli ultimi anni")
     
