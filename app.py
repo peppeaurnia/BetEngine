@@ -1406,8 +1406,8 @@ def calculate_top_predictions(probabilities: dict, home_team: str, away_team: st
         else:
             pred['stars'] = 0
     
-    # FILTRO: solo EV > 0 (value bets)
-    value_predictions = [p for p in predictions if p['ev'] > 0]
+    # FILTRO: EV > 0 (value bet) E probabilità >= 60%
+    value_predictions = [p for p in predictions if p['ev'] > 0 and p['prob'] >= 60]
     
     # Ordina per EV decrescente (il pronostico con più valore prima)
     value_predictions.sort(key=lambda x: x['ev'], reverse=True)
@@ -1421,7 +1421,7 @@ def display_top_predictions(predictions: list) -> None:
     st.subheader("🏆 Pronostici Consigliati")
     
     if not predictions:
-        st.info("⚠️ Nessun pronostico con EV positivo. Il bookmaker offre quote troppo basse per questa partita.")
+        st.info("⚠️ Nessun pronostico con probabilità ≥60% e EV positivo. Partita senza valore o troppo incerta.")
         return
     
     medals = ['🥇', '🥈', '🥉']
