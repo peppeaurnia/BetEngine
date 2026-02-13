@@ -863,7 +863,7 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     
     daily_trend = cursor.fetchall()
     
-    # Calcola ROI con quote REALI e KELLY CRITERION (ESCLUSE leghe non affidabili)
+    # Calcola ROI con quote REALI (ESCLUSE leghe non affidabili)
     cursor2 = conn.cursor(cursor_factory=RealDictCursor)
     cursor2.execute("""
         SELECT is_won, best_odds, predicted_prob
@@ -884,19 +884,59 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     total_won = general["won"] or 0
     accuracy = (total_won / total_settled * 100) if total_settled > 0 else 0
     
-    # ROI con STAKE FISSO €10 + YIELD
+    # === YIELD CON STAKE A FASCE DI QUOTA ===
+    # Quote basse = stake più alto (più "sicure"), quote alte = stake più basso
+    def get_tiered_stake(odds):
+        """Stake basato sulla fascia di quota."""
+        if odds is None:
+            return 10
+        odds = float(odds)
+        if odds <= 1.35:
+            return 15   # Quote basse: stake alto
+        elif odds <= 1.60:
+            return 12
+        elif odds <= 1.90:
+            return 10
+        elif odds <= 2.30:
+            return 8
+        else:
+            return 6    # Quote alte: stake basso
+    
     total_staked = 0
     total_return = 0
-    stake = 10  # €10 fisso per ogni scommessa
+    
+    # Anche per sole VALUE bets (EV+)
+    total_staked_value = 0
+    total_return_value = 0
+    value_bets_count = 0
+    value_bets_won = 0
     
     for bet in settled_bets:
+        odds = float(bet["best_odds"]) if bet["best_odds"] else 1.85
+        prob = float(bet["predicted_prob"]) if bet["predicted_prob"] else 0.5
+        stake = get_tiered_stake(odds)
+        
+        # Yield totale (tutte le bet)
         total_staked += stake
         if bet["is_won"] == 1:
-            odds = float(bet["best_odds"]) if bet["best_odds"] else 1.85
             total_return += stake * odds
+        
+        # Yield solo VALUE bets (prob * odds > 1 = EV positivo)
+        ev = prob * odds - 1
+        if ev > 0:
+            value_bets_count += 1
+            total_staked_value += stake
+            if bet["is_won"] == 1:
+                total_return_value += stake * odds
+                value_bets_won += 1
     
     roi = ((total_return - total_staked) / total_staked * 100) if total_staked > 0 else 0
     profit = total_return - total_staked
+    
+    # Yield solo value bets
+    roi_value = ((total_return_value - total_staked_value) / total_staked_value * 100) if total_staked_value > 0 else 0
+    profit_value = total_return_value - total_staked_value
+    value_accuracy = (value_bets_won / value_bets_count * 100) if value_bets_count > 0 else 0
     
     # Indicatore affidabilità statistica
     min_sample = 50  # Minimo per significatività
@@ -908,6 +948,10 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
         "accuracy": round(accuracy, 1),
         "roi": round(roi, 1),
         "profit": round(profit, 2),
+        "roi_value": round(roi_value, 1),
+        "profit_value": round(profit_value, 2),
+        "value_bets_count": value_bets_count,
+        "value_accuracy": round(value_accuracy, 1),
         "by_market": [dict(m) for m in by_market],
         "by_league": [dict(l) for l in by_league],
         "daily_trend": [dict(d) for d in daily_trend],
@@ -945,12 +989,22 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
     cursor.close()
     conn.close()
     
-    # Aggrega per mese con stake fisso €10
+    # Aggrega per mese con stake a fasce di quota
     monthly_data = {}
-    stake = 10  # €10 fisso per ogni scommessa
+    
+    def get_tiered_stake(odds):
+        if odds is None: return 10
+        odds = float(odds)
+        if odds <= 1.35: return 15
+        elif odds <= 1.60: return 12
+        elif odds <= 1.90: return 10
+        elif odds <= 2.30: return 8
+        else: return 6
     
     for row in raw_data:
         key = f"{int(row['year'])}-{int(row['month']):02d}"
+        odds = float(row['best_odds']) if row['best_odds'] else 1.85
+        stake = get_tiered_stake(odds)
         
         if key not in monthly_data:
             monthly_data[key] = {
@@ -966,7 +1020,6 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
         
         if row['is_won'] == 1:
             monthly_data[key]['won'] += 1
-            odds = float(row['best_odds']) if row['best_odds'] else 1.85
             monthly_data[key]['returns'] += stake * odds
         else:
             monthly_data[key]['lost'] += 1
@@ -1378,6 +1431,30 @@ def display_statistics_tab(user_id: int):
     
     with kpi4:
         st.metric("❌ Perse", stats['general']['lost'])
+    
+    # Riga secondaria: Value Bets
+    if stats.get('value_bets_count', 0) > 0:
+        st.markdown("")
+        vk1, vk2, vk3, vk4 = st.columns(4)
+        
+        with vk1:
+            st.metric("💎 Value Bets", f"{stats['value_bets_count']}")
+        
+        with vk2:
+            roi_v = stats.get('roi_value', 0)
+            color = "🟢" if roi_v > 0 else "🔴"
+            st.metric(f"{color} Yield Value", f"{roi_v:+.1f}%", delta=f"€{stats.get('profit_value', 0):+.2f}")
+        
+        with vk3:
+            st.metric("🎯 Accuracy Value", f"{stats.get('value_accuracy', 0)}%")
+        
+        with vk4:
+            total_bets = stats['general'].get('settled', 0)
+            vb = stats.get('value_bets_count', 0)
+            pct = (vb / total_bets * 100) if total_bets > 0 else 0
+            st.metric("📊 % Value", f"{pct:.0f}%")
+        
+        st.caption("💡 **Yield**: tutte le bet (stake a fasce: €15/€12/€10/€8/€6 per quota) — **Yield Value**: solo bet con EV+")
     
     st.markdown("---")
     
