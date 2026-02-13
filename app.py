@@ -238,6 +238,24 @@ if bg_image:
         background-repeat: no-repeat;
         background-attachment: fixed;
     }}
+    
+    /* Mobile: fixed non funziona su iOS/Android, usa scroll + overlay scuro */
+    @media (max-width: 768px), (hover: none) {{
+        .stApp {{
+            background-attachment: scroll !important;
+        }}
+        .stApp::before {{
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(13, 27, 42, 0.85);
+            z-index: 0;
+            pointer-events: none;
+        }}
+    }}
     </style>
     """, unsafe_allow_html=True)
 else:
@@ -338,7 +356,8 @@ st.markdown("""
     
     /* Testo principale su sfondo scuro - SOLO per elementi diretti */
     .stApp > div > div > div > [data-testid="stMarkdownContainer"] p {
-        color: #e8f4fc;
+        color: #e0e0e0;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.4);
     }
     
     /* Label dei form - bianche */
@@ -375,6 +394,7 @@ st.markdown("""
     
     h1, h2, h3, h4, h5, h6 {
         color: #ffffff !important;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     }
     
     /* FORZA tutte le label bianche CON SFONDO TRASPARENTE */
@@ -524,7 +544,8 @@ st.markdown("""
     
     /* Caption e help text - più chiaro per leggibilità */
     .stCaption, small, .stCaption p {
-        color: #a0b4c4 !important;
+        color: #c0c0c0 !important;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
     
     /* Eccezione: testo scuro negli elementi con sfondo chiaro */
@@ -554,10 +575,10 @@ st.markdown("""
         font-family: 'Audiowide', sans-serif;
         font-size: 3.5rem;
         text-align: center;
-        color: #4fc3f7 !important;
+        color: #ffffff !important;
         text-shadow: 0 0 10px rgba(79, 195, 247, 0.6),
                      0 0 20px rgba(79, 195, 247, 0.4),
-                     0 0 30px rgba(79, 195, 247, 0.3);
+                     0 2px 4px rgba(0,0,0,0.8);
         letter-spacing: 5px;
         margin-bottom: 0.5rem;
     }
@@ -565,7 +586,8 @@ st.markdown("""
     .sub-header {
         font-size: 1.1rem;
         text-align: center;
-        color: #b0c4d8 !important;
+        color: #d0d0d0 !important;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
         margin-bottom: 2rem;
     }
     
@@ -598,13 +620,33 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
     
-    /* Metriche Streamlit */
+    /* Metriche Streamlit - testo con shadow per leggibilità su qualsiasi sfondo */
     [data-testid="stMetricValue"] {
-        color: #4fc3f7 !important;
+        color: #ffffff !important;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.8);
     }
     
     [data-testid="stMetricLabel"] {
-        color: #a8d4f0 !important;
+        color: #d0d0d0 !important;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    
+    [data-testid="stMetricDelta"] {
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+    
+    /* Overlay scuro sul contenuto principale per garantire leggibilità */
+    .main .block-container {
+        background: rgba(13, 27, 42, 0.8) !important;
+        border-radius: 12px;
+        padding: 1rem 2rem !important;
+    }
+    
+    @media (max-width: 768px) {
+        .main .block-container {
+            background: rgba(13, 27, 42, 0.92) !important;
+            padding: 0.5rem 1rem !important;
+        }
     }
     
     /* DataFrame/Tabelle - sfondo chiaro per leggibilità */
@@ -924,11 +966,13 @@ st.markdown("""
     /* Testo principale su sfondo scuro - sempre chiaro */
     .stApp h1, .stApp h2, .stApp h3, .stApp h5, .stApp h6 {
         color: #ffffff !important;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     }
     
     /* h4 bianco di default */
     .stApp h4 {
         color: #ffffff !important;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     }
     
     /* OVERRIDE FINALE: h4 dentro team-stats-card = NERO (priorità massima) */
@@ -984,9 +1028,12 @@ st.markdown("""
     div[style*="background:#9b59b6"],
     div[style*="background:#34495e"],
     div[style*="background:#1a1a2e"],
+    div[style*="background:#1a2a3a"],
+    div[style*="background:#0f1f2f"],
     div[style*="background:#1a5f2a"],
     div[style*="background:#8b1538"],
-    div[style*="background:#f39c12"] {
+    div[style*="background:#f39c12"],
+    div[style*="background:rgba(13"] {
         color: #ffffff !important;
     }
     
@@ -999,9 +1046,12 @@ st.markdown("""
     div[style*="background:#9b59b6"] *,
     div[style*="background:#34495e"] *,
     div[style*="background:#1a1a2e"] *,
+    div[style*="background:#1a2a3a"] *,
+    div[style*="background:#0f1f2f"] *,
     div[style*="background:#1a5f2a"] *,
     div[style*="background:#8b1538"] *,
-    div[style*="background:#f39c12"] * {
+    div[style*="background:#f39c12"] *,
+    div[style*="background:rgba(13"] * {
         color: #ffffff !important;
     }
     
@@ -1104,7 +1154,7 @@ def create_probability_bar(probs: dict, labels: list, colors: list, title: str) 
         showlegend=False,
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#e8f4fc'),
+        font=dict(color='#ffffff'),
         xaxis_gridcolor='rgba(255,255,255,0.1)'
     )
     
@@ -1147,7 +1197,7 @@ def create_ou_comparison(probs: dict) -> go.Figure:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#e8f4fc'),
+        font=dict(color='#ffffff'),
         xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
         yaxis_gridcolor='rgba(255,255,255,0.1)'
     )
@@ -1191,7 +1241,7 @@ def create_cards_comparison(probs: dict) -> go.Figure:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#e8f4fc'),
+        font=dict(color='#ffffff'),
         xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
         yaxis_gridcolor='rgba(255,255,255,0.1)'
     )
@@ -1222,7 +1272,7 @@ def create_score_matrix_heatmap(matrix: np.ndarray, home_name: str, away_name: s
         yaxis=dict(autorange='reversed'),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#e8f4fc'),
+        font=dict(color='#ffffff'),
     )
     
     return fig
@@ -1458,21 +1508,21 @@ def display_top_predictions(predictions: list) -> None:
             odds_icon = "🎰" if pred.get('odds_source') == 'real' else "📊"
             
             st.markdown(f"""
-            <div style="background: linear-gradient(135deg, {colors[i]}22, {colors[i]}44); 
+            <div style="background: linear-gradient(135deg, #1a2a3a, #0f1f2f); 
                         border: 2px solid {colors[i]}; 
                         border-radius: 15px; 
                         padding: 15px; 
                         text-align: center;
                         min-height: 180px;">
                 <div style="font-size: 1.8rem;">{medals[i]}</div>
-                <div style="font-size: 0.9rem; font-weight: bold; color: #e8f4fc; margin: 8px 0;">
+                <div style="font-size: 0.9rem; font-weight: bold; color: #ffffff; margin: 8px 0;">
                     {pred['icon']} {pred['name']}
                 </div>
-                <div style="font-size: 1.5rem; font-weight: bold; color: #4fc3f7;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #ffffff;">
                     {pred['prob']:.1f}%
                 </div>
-                <div style="font-size: 0.85rem; color: #a8d4f0; margin: 4px 0;">
-                    {odds_icon} Quota: <strong>{odds:.2f}</strong>
+                <div style="font-size: 0.85rem; color: #d0d0d0; margin: 4px 0;">
+                    {odds_icon} Quota: <strong style="color:#ffffff;">{odds:.2f}</strong>
                 </div>
                 <div style="background:{ev_color}; color:white; display:inline-block; 
                             padding:3px 10px; border-radius:10px; font-size:0.8rem; font-weight:bold; margin:4px 0;">
@@ -1748,7 +1798,8 @@ if calculate_btn:
         
         # Versione DESKTOP (nascosta su mobile)
         st.markdown(f"""
-        <div class="match-header-desktop" style="display:flex; align-items:center; justify-content:center; gap:20px; padding:15px 0;">
+        <div class="match-header-desktop" style="display:flex; align-items:center; justify-content:center; gap:20px; padding:15px; 
+             background:rgba(13,27,42,0.9); border-radius:12px; margin-bottom:10px;">
             <div style="display:flex; align-items:center; gap:12px;">
                 {home_logo_html}
                 <span style="font-size:1.4rem; font-weight:700; color:#ffffff;">{home_display}</span>
@@ -1766,7 +1817,8 @@ if calculate_btn:
         away_logo_html_sm = f'<img src="data:image/png;base64,{away_b64}" style="width:30px; height:30px; object-fit:contain;">' if away_b64 else '✈️'
         
         st.markdown(f"""
-        <div class="match-header-mobile" style="display:none; align-items:center; justify-content:center; gap:8px; padding:10px 0; flex-wrap:nowrap;">
+        <div class="match-header-mobile" style="display:none; align-items:center; justify-content:center; gap:8px; padding:10px; flex-wrap:nowrap;
+             background:rgba(13,27,42,0.9); border-radius:12px; margin-bottom:10px;">
             <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
                 {home_logo_html_sm}
                 <span style="font-size:0.9rem; font-weight:700; color:#ffffff; white-space:nowrap;">{home_display}</span>
@@ -2070,7 +2122,7 @@ if calculate_btn:
             ref_label = "NELLA MEDIA"
         
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, {ref_color}22, {ref_color}11); 
+        <div style="background: rgba(13,27,42,0.95); 
                     border-left: 4px solid {ref_color}; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                 <div>
@@ -2079,14 +2131,14 @@ if calculate_btn:
                                  font-size: 0.75em; margin-left: 10px;">{ref_label}</span>
                 </div>
                 <div style="text-align: right;">
-                    <span style="font-size: 0.9em; color: #e0e0e0;">
+                    <span style="font-size: 0.9em; color: #d0d0d0;">
                         📊 {ref_avg:.1f} cart/partita | 
                         ⚖️ Fattore: {severity:.2f}x | 
                         🎮 {ref_matches} partite analizzate
                     </span>
                 </div>
             </div>
-            <div style="font-size: 0.85em; margin-top: 8px; color: #c0c0c0;">
+            <div style="font-size: 0.85em; margin-top: 8px; color: #b0b0b0;">
                 <em>Le probabilità cartellini sono state aggiustate del {((adj-1)*100):+.0f}% rispetto alla media</em>
             </div>
         </div>
