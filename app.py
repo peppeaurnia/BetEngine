@@ -1412,13 +1412,15 @@ def calculate_top_predictions(probabilities: dict, home_team: str, away_team: st
             'name': 'Cart. Over 3.5',
             'short': 'CO3.5',
             'prob': cards_over_35,
-            'icon': '🟨⬆️'
+            'icon': '🟨⬆️',
+            'is_cards': True
         })
         predictions.append({
             'name': 'Cart. Under 3.5',
             'short': 'CU3.5',
             'prob': cards_under_35,
-            'icon': '🟨⬇️'
+            'icon': '🟨⬇️',
+            'is_cards': True
         })
     
     # === CALCOLA EV E FILTRA ===
@@ -1441,26 +1443,57 @@ def calculate_top_predictions(probabilities: dict, home_team: str, away_team: st
         pred['ev'] = prob_dec * pred['odds'] - 1.0
         pred['ev_pct'] = pred['ev'] * 100  # In percentuale
         
-        # Stelle basate sull'EV (non più sulla probabilità)
-        ev_pct = pred['ev_pct']
-        if ev_pct >= 15:
-            pred['stars'] = 5
-        elif ev_pct >= 10:
-            pred['stars'] = 4
-        elif ev_pct >= 5:
-            pred['stars'] = 3
-        elif ev_pct >= 2:
-            pred['stars'] = 2
-        elif ev_pct > 0:
-            pred['stars'] = 1
+        # Stelle basate sull'EV, o sulla probabilità per cartellini senza quote reali
+        is_cards = pred.get('is_cards', False)
+        
+        if is_cards and pred['odds_source'] == 'model':
+            # Cartellini senza quote reali: stelle basate sulla probabilità
+            prob = pred['prob']
+            if prob >= 75:
+                pred['stars'] = 5
+            elif prob >= 70:
+                pred['stars'] = 4
+            elif prob >= 65:
+                pred['stars'] = 3
+            elif prob >= 60:
+                pred['stars'] = 2
+            else:
+                pred['stars'] = 1
         else:
-            pred['stars'] = 0
+            # Tutti gli altri: stelle basate sull'EV
+            ev_pct = pred['ev_pct']
+            if ev_pct >= 15:
+                pred['stars'] = 5
+            elif ev_pct >= 10:
+                pred['stars'] = 4
+            elif ev_pct >= 5:
+                pred['stars'] = 3
+            elif ev_pct >= 2:
+                pred['stars'] = 2
+            elif ev_pct > 0:
+                pred['stars'] = 1
+            else:
+                pred['stars'] = 0
     
-    # FILTRO: EV > 0 (value bet) E probabilità >= 60%
-    value_predictions = [p for p in predictions if p['ev'] > 0 and p['prob'] >= 60]
+    # FILTRO: 
+    # - Mercati con quote reali: EV > 0 E prob >= 60%
+    # - Cartellini senza quote reali: solo prob >= 60% (non hanno quote bookmaker)
+    value_predictions = [
+        p for p in predictions 
+        if p['prob'] >= 60 and (
+            p['ev'] > 0 or 
+            (p.get('is_cards', False) and p['odds_source'] == 'model')
+        )
+    ]
     
-    # Ordina per EV decrescente (il pronostico con più valore prima)
-    value_predictions.sort(key=lambda x: x['ev'], reverse=True)
+    # Ordina: EV reale prima, poi cartellini per probabilità
+    def sort_key(p):
+        if p.get('is_cards', False) and p['odds_source'] == 'model':
+            # Cartellini senza quote: ordina per probabilità (ma dopo le value bet reali)
+            return (-0.001, -p['prob'])
+        return (-p['ev'], -p['prob'])
+    
+    value_predictions.sort(key=sort_key)
     
     return value_predictions[:3]
 
@@ -1493,19 +1526,38 @@ def display_top_predictions(predictions: list) -> None:
         with cols[i]:
             stars = '⭐' * pred['stars'] + '☆' * (5 - pred['stars'])
             
-            ev_pct = pred.get('ev_pct', 0)
-            if ev_pct >= 10:
-                ev_color = "#2ecc71"
-                value_label = "STRONG VALUE"
-            elif ev_pct >= 5:
-                ev_color = "#27ae60"
-                value_label = "VALUE"
-            else:
-                ev_color = "#f1c40f"
-                value_label = "EDGE"
+            is_cards_no_odds = pred.get('is_cards', False) and pred.get('odds_source') == 'model'
             
-            odds = pred.get('odds', 0)
-            odds_icon = "🎰" if pred.get('odds_source') == 'real' else "📊"
+            if is_cards_no_odds:
+                # Cartellini senza quote reali: badge basato sulla probabilità
+                prob = pred['prob']
+                if prob >= 75:
+                    ev_color = "#2ecc71"
+                    value_label = "ALTA PROB."
+                elif prob >= 65:
+                    ev_color = "#27ae60"
+                    value_label = "BUONA PROB."
+                else:
+                    ev_color = "#f1c40f"
+                    value_label = "PROB. OK"
+                badge_text = f"{prob:.0f}% — {value_label}"
+                odds_line = '<div style="font-size: 0.85rem; color: #d0d0d0; margin: 4px 0;">📊 Quote non disponibili</div>'
+            else:
+                # Mercati con quote reali: badge EV
+                ev_pct = pred.get('ev_pct', 0)
+                if ev_pct >= 10:
+                    ev_color = "#2ecc71"
+                    value_label = "STRONG VALUE"
+                elif ev_pct >= 5:
+                    ev_color = "#27ae60"
+                    value_label = "VALUE"
+                else:
+                    ev_color = "#f1c40f"
+                    value_label = "EDGE"
+                badge_text = f"EV: +{ev_pct:.1f}% — {value_label}"
+                odds = pred.get('odds', 0)
+                odds_icon = "🎰" if pred.get('odds_source') == 'real' else "📊"
+                odds_line = f'<div style="font-size: 0.85rem; color: #d0d0d0; margin: 4px 0;">{odds_icon} Quota: <strong style="color:#ffffff;">{odds:.2f}</strong></div>'
             
             st.markdown(f"""
             <div style="background: linear-gradient(135deg, #1a2a3a, #0f1f2f); 
@@ -1521,12 +1573,10 @@ def display_top_predictions(predictions: list) -> None:
                 <div style="font-size: 1.5rem; font-weight: bold; color: #ffffff;">
                     {pred['prob']:.1f}%
                 </div>
-                <div style="font-size: 0.85rem; color: #d0d0d0; margin: 4px 0;">
-                    {odds_icon} Quota: <strong style="color:#ffffff;">{odds:.2f}</strong>
-                </div>
+                {odds_line}
                 <div style="background:{ev_color}; color:white; display:inline-block; 
                             padding:3px 10px; border-radius:10px; font-size:0.8rem; font-weight:bold; margin:4px 0;">
-                    EV: +{ev_pct:.1f}% — {value_label}
+                    {badge_text}
                 </div>
                 <div style="font-size: 0.8rem; color: #ffd700; margin: 4px 0;">
                     {stars}
