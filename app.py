@@ -1337,17 +1337,13 @@ def display_team_stats(stats: dict, team_name: str, is_home: bool) -> None:
 
 def calculate_top_predictions(probabilities: dict, home_team: str, away_team: str, odds_data: dict = None) -> list:
     """
-    Calcola i top 3 pronostici con EV POSITIVO.
+    Calcola i top 3 pronostici con FILTRI OTTIMIZZATI per mercato.
     
-    Solo i pronostici dove: EV = (prob_modello × quota) - 1 > 0
-    vengono consigliati. Se non ci sono quote reali, usa la probabilità
-    come fallback ma segnala che manca la verifica EV.
-    
-    Args:
-        probabilities: Dict con tutte le probabilità calcolate
-        home_team: Nome squadra casa
-        away_team: Nome squadra trasferta
-        odds_data: Dict con quote reali {selection: odds} da The Odds API
+    Soglie calibrate su 143 bet reali (Feb 2026):
+    - 1X2:         prob >= 60% E EV > 0 E quota >= 1.30  → yield +5.8%
+    - Over/Under:  prob >= 75% E quota >= 1.30            → yield +40.1%
+    - Cards:       prob >= 70% (no quote bookmaker)       → yield +2.2%
+    - BTTS:        ESCLUSO (yield -27.5% a ogni soglia testata)
     """
     predictions = []
     
@@ -1355,141 +1351,121 @@ def calculate_top_predictions(probabilities: dict, home_team: str, away_team: st
     p_draw = probabilities['p_draw'] * 100
     p_away = probabilities['p_away'] * 100
     
-    # === MERCATI 1X2 ===
+    # === MERCATI 1X2 === (soglia: prob >= 60%, EV > 0, quota >= 1.30)
     predictions.append({
         'name': f'Vittoria {home_team}',
-        'short': '1',
-        'prob': p_home,
-        'icon': '🏠'
+        'short': '1', 'prob': p_home, 'icon': '🏠', 'market_type': '1X2'
     })
     predictions.append({
         'name': 'Pareggio',
-        'short': 'X',
-        'prob': p_draw,
-        'icon': '🤝'
+        'short': 'X', 'prob': p_draw, 'icon': '🤝', 'market_type': '1X2'
     })
     predictions.append({
         'name': f'Vittoria {away_team}',
-        'short': '2',
-        'prob': p_away,
-        'icon': '✈️'
+        'short': '2', 'prob': p_away, 'icon': '✈️', 'market_type': '1X2'
     })
     
-    # === OVER/UNDER 2.5 GOL ===
+    # === OVER/UNDER 2.5 GOL === (soglia: prob >= 75%, quota >= 1.30)
     predictions.append({
         'name': 'Over 2.5',
-        'short': 'O2.5',
-        'prob': probabilities.get('over_2.5', 0) * 100,
-        'icon': '⬆️'
+        'short': 'O2.5', 'prob': probabilities.get('over_2.5', 0) * 100,
+        'icon': '⬆️', 'market_type': 'Over/Under'
     })
     predictions.append({
         'name': 'Under 2.5',
-        'short': 'U2.5',
-        'prob': probabilities.get('under_2.5', 0) * 100,
-        'icon': '⬇️'
+        'short': 'U2.5', 'prob': probabilities.get('under_2.5', 0) * 100,
+        'icon': '⬇️', 'market_type': 'Over/Under'
     })
     
-    # === BTTS (GOL/NOGOL) ===
-    predictions.append({
-        'name': 'Gol (BTTS Sì)',
-        'short': 'GG',
-        'prob': probabilities.get('p_btts_yes', 0) * 100,
-        'icon': '⚽'
-    })
-    predictions.append({
-        'name': 'NoGol (BTTS No)',
-        'short': 'NG',
-        'prob': probabilities.get('p_btts_no', 0) * 100,
-        'icon': '🚫'
-    })
+    # === BTTS ESCLUSO DAI PRONOSTICI ===
+    # 48.6% WR su 37 bet, yield -27.5%. Anche a prob>=75% resta in perdita.
+    # Il modello Poisson sovrastima sistematicamente p(NoGol).
     
-    # === CARTELLINI OVER/UNDER 3.5 ===
+    # === CARTELLINI OVER/UNDER 3.5 === (soglia: prob >= 70%)
     cards_over_35 = probabilities.get('cards_over_3.5', 0) * 100
     cards_under_35 = probabilities.get('cards_under_3.5', 0) * 100
     
-    if cards_over_35 > 0:  # Solo se abbiamo dati cartellini
+    if cards_over_35 > 0:
         predictions.append({
             'name': 'Cart. Over 3.5',
-            'short': 'CO3.5',
-            'prob': cards_over_35,
-            'icon': '🟨⬆️',
-            'is_cards': True
+            'short': 'CO3.5', 'prob': cards_over_35,
+            'icon': '🟨⬆️', 'is_cards': True, 'market_type': 'Cards'
         })
         predictions.append({
             'name': 'Cart. Under 3.5',
-            'short': 'CU3.5',
-            'prob': cards_under_35,
-            'icon': '🟨⬇️',
-            'is_cards': True
+            'short': 'CU3.5', 'prob': cards_under_35,
+            'icon': '🟨⬇️', 'is_cards': True, 'market_type': 'Cards'
         })
     
-    # === CALCOLA EV E FILTRA ===
+    # === CALCOLA EV ===
     has_real_odds = odds_data and len(odds_data) > 0
     
+    # Soglie per mercato (calibrate su dati reali Feb 2026)
+    MARKET_FILTERS = {
+        '1X2':        {'min_prob': 60, 'min_ev': 0.001, 'min_odds': 1.30},
+        'Over/Under': {'min_prob': 75, 'min_ev': None,  'min_odds': 1.30},
+        'Cards':      {'min_prob': 70, 'min_ev': None,  'min_odds': None},
+    }
+    
     for pred in predictions:
-        prob_dec = pred['prob'] / 100.0  # Probabilità decimale (0-1)
+        prob_dec = pred['prob'] / 100.0
         short = pred['short'].replace(" ", "")
         
         if has_real_odds and short in odds_data:
-            # Quota REALE dal bookmaker
             pred['odds'] = float(odds_data[short])
             pred['odds_source'] = 'real'
         else:
-            # Nessuna quota reale → calcola quota implicita
             pred['odds'] = round(1.0 / max(prob_dec, 0.01), 2) if prob_dec > 0 else 100.0
             pred['odds_source'] = 'model'
         
-        # EV = (probabilità modello × quota) - 1
         pred['ev'] = prob_dec * pred['odds'] - 1.0
-        pred['ev_pct'] = pred['ev'] * 100  # In percentuale
+        pred['ev_pct'] = pred['ev'] * 100
         
-        # Stelle basate sull'EV, o sulla probabilità per cartellini senza quote reali
+        # Stelle
         is_cards = pred.get('is_cards', False)
-        
         if is_cards and pred['odds_source'] == 'model':
-            # Cartellini senza quote reali: stelle basate sulla probabilità
             prob = pred['prob']
-            if prob >= 75:
-                pred['stars'] = 5
-            elif prob >= 70:
-                pred['stars'] = 4
-            elif prob >= 65:
-                pred['stars'] = 3
-            elif prob >= 60:
-                pred['stars'] = 2
-            else:
-                pred['stars'] = 1
+            if prob >= 80: pred['stars'] = 5
+            elif prob >= 75: pred['stars'] = 4
+            elif prob >= 70: pred['stars'] = 3
+            else: pred['stars'] = 2
         else:
-            # Tutti gli altri: stelle basate sull'EV
             ev_pct = pred['ev_pct']
-            if ev_pct >= 15:
-                pred['stars'] = 5
-            elif ev_pct >= 10:
-                pred['stars'] = 4
-            elif ev_pct >= 5:
-                pred['stars'] = 3
-            elif ev_pct >= 2:
-                pred['stars'] = 2
-            elif ev_pct > 0:
-                pred['stars'] = 1
-            else:
-                pred['stars'] = 0
+            if ev_pct >= 15: pred['stars'] = 5
+            elif ev_pct >= 10: pred['stars'] = 4
+            elif ev_pct >= 5: pred['stars'] = 3
+            elif ev_pct >= 2: pred['stars'] = 2
+            elif ev_pct > 0: pred['stars'] = 1
+            else: pred['stars'] = 0
     
-    # FILTRO: 
-    # - Mercati con quote reali: EV > 0 E prob >= 60%
-    # - Cartellini senza quote reali: solo prob >= 60% (non hanno quote bookmaker)
-    value_predictions = [
-        p for p in predictions 
-        if p['prob'] >= 60 and (
-            p['ev'] > 0 or 
-            (p.get('is_cards', False) and p['odds_source'] == 'model')
-        )
-    ]
+    # === FILTRO PER MERCATO ===
+    value_predictions = []
+    for p in predictions:
+        mtype = p.get('market_type', '')
+        filt = MARKET_FILTERS.get(mtype)
+        if not filt:
+            continue
+        
+        # Probabilità minima
+        if p['prob'] < filt['min_prob']:
+            continue
+        
+        # Quota minima
+        if filt['min_odds'] and p['odds'] < filt['min_odds']:
+            continue
+        
+        # EV minimo (solo per mercati con quote reali, cards bypassa)
+        if filt['min_ev'] is not None:
+            if p.get('is_cards', False) and p['odds_source'] == 'model':
+                pass  # Cards senza quote: bypassa check EV
+            elif p['ev'] < filt['min_ev']:
+                continue
+        
+        value_predictions.append(p)
     
     # Ordina: EV reale prima, poi cartellini per probabilità
     def sort_key(p):
         if p.get('is_cards', False) and p['odds_source'] == 'model':
-            # Cartellini senza quote: ordina per probabilità (ma dopo le value bet reali)
             return (-0.001, -p['prob'])
         return (-p['ev'], -p['prob'])
     
@@ -1504,7 +1480,7 @@ def display_top_predictions(predictions: list) -> None:
     st.subheader("🏆 Pronostici Consigliati")
     
     if not predictions:
-        st.info("⚠️ Nessun pronostico con probabilità ≥60% e EV positivo. Partita senza valore o troppo incerta.")
+        st.info("⚠️ Nessun pronostico supera i filtri. Soglie: 1X2 ≥60% + EV+, O/U ≥75%, Cards ≥70%. BTTS escluso.")
         return
     
     medals = ['🥇', '🥈', '🥉']

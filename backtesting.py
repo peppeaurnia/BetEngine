@@ -21,28 +21,15 @@ import traceback
 # Import configurazione database
 from database import get_connection
 
-# ============================================================
-# LEGHE ESCLUSE DAL BACKTESTING
-# ============================================================
-# Queste leghe NON vengono conteggiate nelle statistiche e nel ROI
-# perché il modello è troppo poco preciso su di esse.
-# I pronostici vengono comunque salvati, ma ignorati nei calcoli.
-#
-# Per aggiungere/rimuovere leghe, modifica questa lista.
-# Usa i nomi ESATTI come appaiono nel database (case-insensitive).
-EXCLUDED_LEAGUES = [
-    "eredivisie",
-    "primeira liga",
-]
 
-def is_league_excluded(league_name: str) -> bool:
-    """Controlla se una lega è nella lista esclusa.
-    Gestisce tutti i formati: 'Eredivisie', 'NL Eredivisie', 'Primeira Liga', etc.
-    """
-    if not league_name:
-        return False
-    name_lower = league_name.lower().strip()
-    return any(excl in name_lower for excl in EXCLUDED_LEAGUES)
+# ============================================================
+# FILTRI BACKTESTING (calibrati su dati reali Feb 2026)
+# ============================================================
+# BTTS: 48.6% WR, yield -27.5% → escluso dal ROI
+# Eredivisie (88): 46.2% accuracy → troppo impreciso
+# Primeira Liga (94): 46.7% accuracy → troppo impreciso
+EXCLUDED_MARKETS_ROI = ('BTTS',)  # Mercati esclusi dal calcolo ROI
+EXCLUDED_LEAGUES_ROI = (88, 94)    # League ID escluse dal calcolo ROI
 
 
 # ============================================================
@@ -778,7 +765,7 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     
     date_limit = datetime.now() - timedelta(days=days)
     
-    # Statistiche generali (ESCLUSE leghe non affidabili)
+    # Statistiche generali
     cursor.execute("""
         SELECT 
             COUNT(*) as total_predictions,
@@ -789,13 +776,11 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
             COUNT(CASE WHEN is_won IS NULL AND match_date >= CURRENT_DATE THEN 1 END) as pending_match
         FROM predictions
         WHERE user_id = %s AND created_at >= %s
-        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
-        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
     """, (user_id, date_limit))
     
     general = cursor.fetchone()
     
-    # Statistiche per mercato (ESCLUSE leghe non affidabili)
+    # Statistiche per mercato
     cursor.execute("""
         SELECT 
             market,
@@ -810,15 +795,13 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
             ) as accuracy
         FROM predictions
         WHERE user_id = %s AND created_at >= %s
-        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
-        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
         GROUP BY market
         ORDER BY accuracy DESC
     """, (user_id, date_limit))
     
     by_market = cursor.fetchall()
     
-    # Statistiche per lega (mostra tutte, ma marca quelle escluse)
+    # Statistiche per lega
     cursor.execute("""
         SELECT 
             league_name,
@@ -829,13 +812,7 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
                 THEN COUNT(CASE WHEN is_won = 1 THEN 1 END)::decimal / 
                      COUNT(CASE WHEN is_won IS NOT NULL THEN 1 END) * 100
                 ELSE 0 END, 1
-            ) as accuracy,
-            CASE 
-                WHEN LOWER(league_name) LIKE '%%eredivisie%%' 
-                  OR LOWER(league_name) LIKE '%%primeira liga%%' 
-                THEN TRUE 
-                ELSE FALSE 
-            END as excluded
+            ) as accuracy
         FROM predictions
         WHERE user_id = %s AND created_at >= %s
         GROUP BY league_name
@@ -845,7 +822,7 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     
     by_league = cursor.fetchall()
     
-    # Trend ultimi 7 giorni (ESCLUSE leghe non affidabili)
+    # Trend ultimi 7 giorni
     cursor.execute("""
         SELECT 
             match_date,
@@ -855,23 +832,21 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
         WHERE user_id = %s 
         AND match_date >= CURRENT_DATE - INTERVAL '7 days'
         AND is_won IS NOT NULL
-        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
-        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
         GROUP BY match_date
         ORDER BY match_date
     """, (user_id,))
     
     daily_trend = cursor.fetchall()
     
-    # Calcola ROI con quote REALI (ESCLUSE leghe non affidabili)
+    # Calcola ROI con quote REALI — ESCLUSI BTTS e leghe imprecise
     cursor2 = conn.cursor(cursor_factory=RealDictCursor)
     cursor2.execute("""
         SELECT is_won, best_odds, predicted_prob
         FROM predictions
         WHERE user_id = %s AND created_at >= %s AND is_won IS NOT NULL
-        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
-        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
-    """, (user_id, date_limit))
+        AND market NOT IN %s
+        AND (league_id IS NULL OR league_id NOT IN %s)
+    """, (user_id, date_limit, EXCLUDED_MARKETS_ROI, EXCLUDED_LEAGUES_ROI))
     
     settled_bets = cursor2.fetchall()
     cursor2.close()
@@ -884,80 +859,28 @@ def get_user_statistics(user_id: int, days: int = 30) -> Dict:
     total_won = general["won"] or 0
     accuracy = (total_won / total_settled * 100) if total_settled > 0 else 0
     
-    # === YIELD CON STAKE A FASCE DI QUOTA ===
-    # Quote basse = stake più alto (più "sicure"), quote alte = stake più basso
-    def get_tiered_stake(odds):
-        """Stake basato sulla fascia di quota."""
-        if odds is None:
-            return 10
-        odds = float(odds)
-        if odds <= 1.35:
-            return 15   # Quote basse: stake alto
-        elif odds <= 1.60:
-            return 12
-        elif odds <= 1.90:
-            return 10
-        elif odds <= 2.30:
-            return 8
-        else:
-            return 6    # Quote alte: stake basso
-    
+    # ROI con STAKE FISSO €10
     total_staked = 0
     total_return = 0
-    
-    # Anche per sole VALUE bets (EV+)
-    total_staked_value = 0
-    total_return_value = 0
-    value_bets_count = 0
-    value_bets_won = 0
+    stake = 10  # €10 fisso per ogni scommessa
     
     for bet in settled_bets:
-        odds = float(bet["best_odds"]) if bet["best_odds"] else 1.85
-        prob = float(bet["predicted_prob"]) if bet["predicted_prob"] else 0.5
-        stake = get_tiered_stake(odds)
-        
-        # Yield totale (tutte le bet)
         total_staked += stake
         if bet["is_won"] == 1:
+            odds = float(bet["best_odds"]) if bet["best_odds"] else 1.85
             total_return += stake * odds
-        
-        # Yield solo VALUE bets (prob * odds > 1 = EV positivo)
-        ev = prob * odds - 1
-        if ev > 0:
-            value_bets_count += 1
-            total_staked_value += stake
-            if bet["is_won"] == 1:
-                total_return_value += stake * odds
-                value_bets_won += 1
     
     roi = ((total_return - total_staked) / total_staked * 100) if total_staked > 0 else 0
     profit = total_return - total_staked
-    
-    # Yield solo value bets
-    roi_value = ((total_return_value - total_staked_value) / total_staked_value * 100) if total_staked_value > 0 else 0
-    profit_value = total_return_value - total_staked_value
-    value_accuracy = (value_bets_won / value_bets_count * 100) if value_bets_count > 0 else 0
-    
-    # Indicatore affidabilità statistica
-    min_sample = 50  # Minimo per significatività
-    sample_size = total_settled
-    is_reliable = sample_size >= min_sample
     
     return {
         "general": dict(general),
         "accuracy": round(accuracy, 1),
         "roi": round(roi, 1),
         "profit": round(profit, 2),
-        "roi_value": round(roi_value, 1),
-        "profit_value": round(profit_value, 2),
-        "value_bets_count": value_bets_count,
-        "value_accuracy": round(value_accuracy, 1),
         "by_market": [dict(m) for m in by_market],
         "by_league": [dict(l) for l in by_league],
-        "daily_trend": [dict(d) for d in daily_trend],
-        "is_reliable": is_reliable,
-        "sample_size": sample_size,
-        "min_sample": min_sample
+        "daily_trend": [dict(d) for d in daily_trend]
     }
 
 
@@ -971,7 +894,7 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
-    # Prendi tutte le scommesse concluse (ESCLUSE leghe non affidabili)
+    # Prendi tutte le scommesse concluse — ESCLUSI BTTS e leghe imprecise
     cursor.execute("""
         SELECT 
             EXTRACT(YEAR FROM match_date) as year,
@@ -980,31 +903,21 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
             best_odds
         FROM predictions
         WHERE user_id = %s AND is_won IS NOT NULL
-        AND LOWER(league_name) NOT LIKE '%%eredivisie%%'
-        AND LOWER(league_name) NOT LIKE '%%primeira liga%%'
+        AND market NOT IN %s
+        AND (league_id IS NULL OR league_id NOT IN %s)
         ORDER BY match_date DESC
-    """, (user_id,))
+    """, (user_id, EXCLUDED_MARKETS_ROI, EXCLUDED_LEAGUES_ROI))
     
     raw_data = cursor.fetchall()
     cursor.close()
     conn.close()
     
-    # Aggrega per mese con stake a fasce di quota
+    # Aggrega per mese con stake fisso €10
     monthly_data = {}
-    
-    def get_tiered_stake(odds):
-        if odds is None: return 10
-        odds = float(odds)
-        if odds <= 1.35: return 15
-        elif odds <= 1.60: return 12
-        elif odds <= 1.90: return 10
-        elif odds <= 2.30: return 8
-        else: return 6
+    stake = 10  # €10 fisso per ogni scommessa
     
     for row in raw_data:
         key = f"{int(row['year'])}-{int(row['month']):02d}"
-        odds = float(row['best_odds']) if row['best_odds'] else 1.85
-        stake = get_tiered_stake(odds)
         
         if key not in monthly_data:
             monthly_data[key] = {
@@ -1020,6 +933,7 @@ def get_monthly_roi(user_id: int) -> List[Dict]:
         
         if row['is_won'] == 1:
             monthly_data[key]['won'] += 1
+            odds = float(row['best_odds']) if row['best_odds'] else 1.85
             monthly_data[key]['returns'] += stake * odds
         else:
             monthly_data[key]['lost'] += 1
@@ -1396,26 +1310,8 @@ def display_statistics_tab(user_id: int):
         st.info("📭 Nessuna previsione salvata. Calcola qualche partita per iniziare!")
         return
     
-    # Nota leghe escluse
-    st.caption("⛔ Eredivisie e Primeira Liga escluse dal conteggio (modello poco preciso)")
-    
     # KPI principali
     st.markdown("### 📊 Performance Generale")
-    
-    # Avviso campione statistico
-    if not stats.get('is_reliable', True):
-        sample = stats.get('sample_size', 0)
-        needed = stats.get('min_sample', 50)
-        st.markdown(f"""
-        <div style="background:rgba(243, 156, 18, 0.3); border-left:4px solid #f39c12; 
-                    padding:12px; border-radius:8px; margin-bottom:16px;">
-            <strong style="color:#f39c12;">⚠️ Campione troppo piccolo ({sample}/{needed} bet minime)</strong><br>
-            <span style="color:#a8d4f0;">
-                Le statistiche con meno di {needed} scommesse concluse non sono affidabili. 
-                Accuracy e ROI possono variare molto. Aspetta qualche giornata prima di trarre conclusioni.
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
     
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     
@@ -1423,38 +1319,13 @@ def display_statistics_tab(user_id: int):
         st.metric("🎯 Accuracy", f"{stats['accuracy']}%")
     
     with kpi2:
-        roi_label = "📈 Yield" if stats.get('is_reliable', True) else "📈 Yield ⚠️"
-        st.metric(roi_label, f"{stats['roi']:+.1f}%", delta=f"€{stats['profit']:+.2f}")
+        st.metric("📈 ROI", f"{stats['roi']:+.1f}%", delta=f"€{stats['profit']:+.2f}")
     
     with kpi3:
         st.metric("✅ Vinte", stats['general']['won'])
     
     with kpi4:
         st.metric("❌ Perse", stats['general']['lost'])
-    
-    # Riga secondaria: Value Bets
-    if stats.get('value_bets_count', 0) > 0:
-        st.markdown("")
-        vk1, vk2, vk3, vk4 = st.columns(4)
-        
-        with vk1:
-            st.metric("💎 Value Bets", f"{stats['value_bets_count']}")
-        
-        with vk2:
-            roi_v = stats.get('roi_value', 0)
-            color = "🟢" if roi_v > 0 else "🔴"
-            st.metric(f"{color} Yield Value", f"{roi_v:+.1f}%", delta=f"€{stats.get('profit_value', 0):+.2f}")
-        
-        with vk3:
-            st.metric("🎯 Accuracy Value", f"{stats.get('value_accuracy', 0)}%")
-        
-        with vk4:
-            total_bets = stats['general'].get('settled', 0)
-            vb = stats.get('value_bets_count', 0)
-            pct = (vb / total_bets * 100) if total_bets > 0 else 0
-            st.metric("📊 % Value", f"{pct:.0f}%")
-        
-        st.caption("💡 **Yield**: tutte le bet (stake a fasce: €15/€12/€10/€8/€6 per quota) — **Yield Value**: solo bet con EV+")
     
     st.markdown("---")
     
@@ -1485,22 +1356,11 @@ def display_statistics_tab(user_id: int):
         if stats['by_league']:
             for league in stats['by_league'][:10]:  # Mostra fino a 10 leghe
                 accuracy = league['accuracy'] or 0
-                
-                # Check esclusione lato Python (più affidabile del booleano SQL)
-                is_excluded = is_league_excluded(league.get('league_name', ''))
-                
-                if is_excluded:
-                    emoji = "⛔"
-                    badge = ' <span style="background:#e74c3c; color:white; padding:2px 6px; border-radius:4px; font-size:0.7em;">ESCLUSA DAL ROI</span>'
-                    opacity = "0.5"
-                else:
-                    emoji = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
-                    badge = ""
-                    opacity = "1.0"
+                emoji = "🟢" if accuracy >= 55 else "🟡" if accuracy >= 50 else "🔴"
                 
                 st.markdown(f"""
-                <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:8px; margin-bottom:8px; opacity:{opacity};">
-                    <strong style="color:#ffffff;">{emoji} {league['league_name']}</strong>{badge}<br>
+                <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:8px; margin-bottom:8px;">
+                    <strong style="color:#ffffff;">{emoji} {league['league_name']}</strong><br>
                     <span style="color:#a8d4f0;">Totale: {league['total']}</span><br>
                     <span style="color:#4fc3f7; font-size:1.2em;"><strong>{accuracy}%</strong></span>
                 </div>
@@ -1510,8 +1370,8 @@ def display_statistics_tab(user_id: int):
     
     st.markdown("---")
     
-    # YIELD MENSILE
-    st.markdown("### 📅 Yield Mensile")
+    # ROI MENSILE
+    st.markdown("### 📅 ROI Mensile")
     
     monthly_stats = get_monthly_roi(user_id)
     
@@ -1901,7 +1761,7 @@ def display_update_tab(user_id: int, api_key: str):
     conn.close()
     
     if pending:
-        st.markdown(f"<span style='color:#ffffff;'>**Trovate {len(pending)} partite senza risultato:**</span>", unsafe_allow_html=True)
+        st.markdown(f"**Trovate {len(pending)} partite senza risultato:**")
         for match in pending:
             date_str = match['match_date'].strftime("%d/%m/%Y") if match['match_date'] else "N/A"
             is_past = match['match_date'] < db_time['today'] if match['match_date'] else False
@@ -1910,7 +1770,7 @@ def display_update_tab(user_id: int, api_key: str):
             <div style="background:rgba(243, 156, 18, 0.2); border-left:4px solid #f39c12; 
                         padding:10px; border-radius:8px; margin-bottom:8px;">
                 <span style="color:#ffffff;">{status_icon} <strong>{match['home_team']} vs {match['away_team']}</strong></span><br>
-                <span style="color:#d0d0d0;">📅 {date_str} | 🏆 {match['league_name']} | ID: {match['match_id']}</span>
+                <span style="color:#a8d4f0;">📅 {date_str} | 🏆 {match['league_name']} | ID: {match['match_id']}</span>
             </div>
             """, unsafe_allow_html=True)
     else:
