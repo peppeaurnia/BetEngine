@@ -994,3 +994,159 @@ def get_fixture_id(api_key: str, home_team_id: int, away_team_id: int,
     except Exception as e:
         print(f"Errore ricerca fixture_id: {e}")
         return None
+
+
+# ============================================================
+# PARTITE DEL GIORNO - Per la pagina principale
+# ============================================================
+
+@st.cache_data(ttl=900, show_spinner=False)  # Cache 15 minuti
+def fetch_todays_fixtures(api_key: str, date_str: str = None) -> Dict[int, List[Dict]]:
+    """
+    Recupera tutte le partite del giorno per le leghe supportate.
+    
+    Args:
+        api_key: Chiave API-Football
+        date_str: Data in formato YYYY-MM-DD (default: oggi)
+    
+    Returns:
+        Dict { league_id: [ {fixture_id, home_name, away_name, home_id, away_id, 
+                             time, status, home_logo, away_logo, score_home, score_away} ] }
+    """
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    
+    all_fixtures = {}
+    
+    for league_id in LEAGUES:
+        season = get_current_season()
+        url = f"{BASE_URL}/fixtures"
+        params = {
+            "league": league_id,
+            "season": season,
+            "date": date_str
+        }
+        
+        try:
+            response = requests.get(url, headers=_get_headers(api_key), params=params, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            
+            fixtures = []
+            for item in data.get("response", []):
+                fixture = item.get("fixture", {})
+                teams = item.get("teams", {})
+                goals = item.get("goals", {})
+                
+                # Orario partita
+                fixture_date = fixture.get("date", "")
+                try:
+                    dt = datetime.strptime(fixture_date[:19], "%Y-%m-%dT%H:%M:%S")
+                    # Aggiungi offset per timezone italiana (UTC+2 in estate, UTC+1 in inverno)
+                    import calendar
+                    month = dt.month
+                    # Approssimazione: da aprile a ottobre = UTC+2, altrimenti UTC+1
+                    offset = 2 if 4 <= month <= 10 else 1
+                    from datetime import timedelta
+                    dt_local = dt + timedelta(hours=offset)
+                    time_str = dt_local.strftime("%H:%M")
+                except:
+                    time_str = "TBD"
+                
+                status_short = fixture.get("status", {}).get("short", "NS")
+                
+                fixtures.append({
+                    "fixture_id": fixture.get("id"),
+                    "home_name": teams.get("home", {}).get("name", "?"),
+                    "away_name": teams.get("away", {}).get("name", "?"),
+                    "home_id": teams.get("home", {}).get("id"),
+                    "away_id": teams.get("away", {}).get("id"),
+                    "home_logo": teams.get("home", {}).get("logo"),
+                    "away_logo": teams.get("away", {}).get("logo"),
+                    "time": time_str,
+                    "status": status_short,
+                    "score_home": goals.get("home"),
+                    "score_away": goals.get("away"),
+                    "referee": fixture.get("referee"),
+                })
+            
+            if fixtures:
+                # Ordina per orario
+                fixtures.sort(key=lambda x: x["time"])
+                all_fixtures[league_id] = fixtures
+        
+        except requests.exceptions.RequestException:
+            continue
+    
+    return all_fixtures
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_fixtures_for_date_range(api_key: str, date_from: str, date_to: str) -> Dict[int, List[Dict]]:
+    """
+    Recupera le partite per un range di date (per mostrare anche domani/dopodomani).
+    Stessa struttura di fetch_todays_fixtures.
+    """
+    all_fixtures = {}
+    
+    for league_id in LEAGUES:
+        season = get_current_season()
+        url = f"{BASE_URL}/fixtures"
+        params = {
+            "league": league_id,
+            "season": season,
+            "from": date_from,
+            "to": date_to
+        }
+        
+        try:
+            response = requests.get(url, headers=_get_headers(api_key), params=params, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            
+            fixtures = []
+            for item in data.get("response", []):
+                fixture = item.get("fixture", {})
+                teams = item.get("teams", {})
+                goals = item.get("goals", {})
+                
+                fixture_date = fixture.get("date", "")
+                try:
+                    dt = datetime.strptime(fixture_date[:19], "%Y-%m-%dT%H:%M:%S")
+                    month = dt.month
+                    offset = 2 if 4 <= month <= 10 else 1
+                    from datetime import timedelta
+                    dt_local = dt + timedelta(hours=offset)
+                    time_str = dt_local.strftime("%H:%M")
+                    date_display = dt_local.strftime("%d/%m")
+                except:
+                    time_str = "TBD"
+                    date_display = ""
+                
+                status_short = fixture.get("status", {}).get("short", "NS")
+                
+                fixtures.append({
+                    "fixture_id": fixture.get("id"),
+                    "home_name": teams.get("home", {}).get("name", "?"),
+                    "away_name": teams.get("away", {}).get("name", "?"),
+                    "home_id": teams.get("home", {}).get("id"),
+                    "away_id": teams.get("away", {}).get("id"),
+                    "home_logo": teams.get("home", {}).get("logo"),
+                    "away_logo": teams.get("away", {}).get("logo"),
+                    "time": time_str,
+                    "date_display": date_display,
+                    "date_raw": fixture_date[:10],
+                    "status": status_short,
+                    "score_home": goals.get("home"),
+                    "score_away": goals.get("away"),
+                    "referee": fixture.get("referee"),
+                })
+            
+            if fixtures:
+                fixtures.sort(key=lambda x: (x.get("date_raw", ""), x["time"]))
+                all_fixtures[league_id] = fixtures
+        
+        except requests.exceptions.RequestException:
+            continue
+    
+    return all_fixtures
