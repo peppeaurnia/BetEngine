@@ -330,8 +330,7 @@ st.markdown("""
 # ============================================================
 
 CHART_LAYOUT = dict(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-    font=dict(color='#c9d1d9', family='DM Sans'),
-    xaxis=dict(gridcolor='#21262d'), yaxis=dict(gridcolor='#21262d'))
+    font=dict(color='#c9d1d9', family='DM Sans'))
 
 def chart_1x2(probs, home, away):
     vals = [probs.get(k,0)*100 for k in ['p_home','p_draw','p_away']]
@@ -339,7 +338,8 @@ def chart_1x2(probs, home, away):
         marker_color=['#238636','#d29922','#da3633'],
         text=[f'{v:.1f}%' for v in vals], textposition='inside', textfont=dict(size=14, color='white')))
     fig.update_layout(**CHART_LAYOUT, height=200, margin=dict(l=10, r=10, t=10, b=10),
-        xaxis=dict(range=[0,100], showticklabels=False, gridcolor='#21262d'), showlegend=False)
+        xaxis=dict(range=[0,100], showticklabels=False, gridcolor='#21262d'),
+        yaxis=dict(gridcolor='#21262d'), showlegend=False)
     return fig
 
 def chart_ou(probs):
@@ -351,7 +351,8 @@ def chart_ou(probs):
     fig.add_trace(go.Bar(name='UNDER', x=[f'{l}' for l in lines],
         y=[probs.get(f"under_{l}",0)*100 for l in lines], marker_color='#da3633',
         text=[f'{probs.get(f"under_{l}",0)*100:.1f}%' for l in lines], textposition='outside'))
-    fig.update_layout(**CHART_LAYOUT, height=320, barmode='group', yaxis=dict(range=[0,100], gridcolor='#21262d'),
+    fig.update_layout(**CHART_LAYOUT, height=320, barmode='group',
+        xaxis=dict(gridcolor='#21262d'), yaxis=dict(range=[0,100], gridcolor='#21262d'),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=10, r=10, t=10, b=30))
     return fig
@@ -365,7 +366,8 @@ def chart_cards(probs):
     fig.add_trace(go.Bar(name='UNDER', x=[f'{l}' for l in lines],
         y=[probs.get(f"cards_under_{l}",0)*100 for l in lines], marker_color='#8957e5',
         text=[f'{probs.get(f"cards_under_{l}",0)*100:.1f}%' for l in lines], textposition='outside'))
-    fig.update_layout(**CHART_LAYOUT, height=320, barmode='group', yaxis=dict(range=[0,100], gridcolor='#21262d'),
+    fig.update_layout(**CHART_LAYOUT, height=320, barmode='group',
+        xaxis=dict(gridcolor='#21262d'), yaxis=dict(range=[0,100], gridcolor='#21262d'),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=10, r=10, t=10, b=30))
     return fig
@@ -378,7 +380,8 @@ def chart_heatmap(matrix, home, away):
         texttemplate='%{text}', textfont=dict(size=10, color='white'),
         hovertemplate=f'{home} %{{y}} - %{{x}} {away}<br>Prob: %{{z:.2f}}%<extra></extra>'))
     fig.update_layout(**CHART_LAYOUT, height=380, xaxis_title=f"Gol {away}", yaxis_title=f"Gol {home}",
-        yaxis=dict(autorange='reversed', gridcolor='#21262d'), margin=dict(l=10, r=10, t=10, b=40))
+        xaxis=dict(gridcolor='#21262d'), yaxis=dict(autorange='reversed', gridcolor='#21262d'),
+        margin=dict(l=10, r=10, t=10, b=40))
     return fig
 
 
