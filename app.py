@@ -546,7 +546,9 @@ def show_analysis(fix, lid, lname):
     tbl = '<table><tr><th>Linea</th><th>OVER</th><th>UNDER</th><th>Quota O</th><th>Quota U</th></tr>'
     for l in [1.5,2.5,3.5,4.5]:
         op = pr[f'over_{l}']*100; up = pr[f'under_{l}']*100
-        tbl += f'<tr><td>{l}</td><td>{op:.1f}%</td><td>{up:.1f}%</td><td>{100/op:.2f}</td><td>{100/up:.2f}</td></tr>'
+        qo = f"{100/op:.2f}" if op > 0 else "—"
+        qu = f"{100/up:.2f}" if up > 0 else "—"
+        tbl += f'<tr><td>{l}</td><td>{op:.1f}%</td><td>{up:.1f}%</td><td>{qo}</td><td>{qu}</td></tr>'
     st.markdown(tbl+'</table>', unsafe_allow_html=True)
     st.markdown("---")
     
@@ -576,7 +578,9 @@ def show_analysis(fix, lid, lname):
     ctbl = '<table><tr><th>Linea</th><th>OVER</th><th>UNDER</th><th>Quota O</th><th>Quota U</th></tr>'
     for ln in [2.5,3.5,4.5,5.5,6.5]:
         cop = pr.get(f"cards_over_{ln}",0)*100; cup = pr.get(f"cards_under_{ln}",0)*100
-        ctbl += f'<tr><td>{ln}</td><td>{cop:.1f}%</td><td>{cup:.1f}%</td><td>{100/cop:.2f if cop>0 else "—"}</td><td>{100/cup:.2f if cup>0 else "—"}</td></tr>'
+        qo = f"{100/cop:.2f}" if cop > 0 else "—"
+        qu = f"{100/cup:.2f}" if cup > 0 else "—"
+        ctbl += f'<tr><td>{ln}</td><td>{cop:.1f}%</td><td>{cup:.1f}%</td><td>{qo}</td><td>{qu}</td></tr>'
     st.markdown(ctbl+'</table>', unsafe_allow_html=True)
     st.markdown("---")
     
