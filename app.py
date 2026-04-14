@@ -291,6 +291,36 @@ st.markdown("""
         h2 { font-size: 1.2rem !important; }
         h3 { font-size: 1rem !important; }
     }
+    
+    /* === CALENDAR BUTTONS === */
+    /* Rendi i bottoni del calendario più compatti */
+    [data-testid="stHorizontalBlock"] .stButton > button {
+        font-size: 0.8rem !important;
+        padding: 6px 4px !important;
+        line-height: 1.3 !important;
+        border-radius: 10px !important;
+        min-height: 0 !important;
+    }
+    [data-testid="stHorizontalBlock"] .stButton > button[kind="primary"] {
+        background: #238636 !important;
+        border-color: #238636 !important;
+        color: #ffffff !important;
+    }
+    [data-testid="stHorizontalBlock"] .stButton > button[kind="primary"] p {
+        color: #ffffff !important;
+    }
+    [data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"] {
+        background: #161b22 !important;
+        border: 1px solid #30363d !important;
+        color: #c9d1d9 !important;
+    }
+    [data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"] p {
+        color: #c9d1d9 !important;
+    }
+    [data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"]:hover {
+        background: #1c2433 !important;
+        border-color: #1f6feb !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -500,7 +530,7 @@ def show_analysis(fix, lid, lname):
     # BTTS + O/U 2.5
     st.markdown("#### ⚽ BTTS & Over/Under 2.5")
     b1, b2 = st.columns(2)
-    by = pr.get('btts_yes',0)*100; bn = 100-by; o25 = pr.get('over_2.5',0)*100; u25 = pr.get('under_2.5',0)*100
+    by = pr.get('p_btts_yes',0)*100; bn = 100-by; o25 = pr.get('over_2.5',0)*100; u25 = pr.get('under_2.5',0)*100
     with b1:
         st.markdown(f'<div style="background:#161b22; border:1px solid #21262d; padding:16px; border-radius:10px; text-align:center;"><div style="color:#8b949e; font-size:0.85rem; margin-bottom:8px;">BTTS</div><div style="display:flex; justify-content:center; gap:24px;"><div><div style="font-size:1.6rem; font-weight:700; color:#238636;">{by:.1f}%</div><div style="color:#8b949e; font-size:0.8rem;">GG</div></div><div><div style="font-size:1.6rem; font-weight:700; color:#da3633;">{bn:.1f}%</div><div style="color:#8b949e; font-size:0.8rem;">NG</div></div></div></div>', unsafe_allow_html=True)
     with b2:
@@ -580,12 +610,24 @@ def show_analysis(fix, lid, lname):
 # SIDEBAR
 # ============================================================
 with st.sidebar:
-    st.markdown("### 📅 Data")
-    selected_date = st.date_input("Seleziona data", value=date.today(),
-        min_value=date.today()-timedelta(days=3), max_value=date.today()+timedelta(days=7))
+    st.markdown("### ⚙️ Opzioni")
     st.markdown("---")
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("🔄 Refresh Dati", use_container_width=True):
         st.cache_data.clear(); st.rerun()
+    st.markdown("---")
+    adv_date = st.date_input("📅 Vai a data specifica", value=date.today(),
+        min_value=date.today()-timedelta(days=7), max_value=date.today()+timedelta(days=14))
+    if st.button("Vai", use_container_width=True, key="goto_date"):
+        st.session_state["sel_date"] = adv_date.strftime("%Y-%m-%d"); st.rerun()
+
+
+# ============================================================
+# INIT DATE
+# ============================================================
+if "sel_date" not in st.session_state:
+    st.session_state["sel_date"] = date.today().strftime("%Y-%m-%d")
+
+sel = datetime.strptime(st.session_state["sel_date"], "%Y-%m-%d").date()
 
 
 # ============================================================
@@ -601,16 +643,43 @@ with cl2:
     except:
         st.markdown('<h1 style="font-family:Outfit; text-align:center; font-size:2.5rem; letter-spacing:3px;">BETENGINE</h1>', unsafe_allow_html=True)
 
-st.markdown('<p style="text-align:center; color:#8b949e; margin-bottom:1.5rem; font-size:0.95rem;">Analisi probabilistica partite di calcio</p>', unsafe_allow_html=True)
+st.markdown('<p style="text-align:center; color:#8b949e; margin-bottom:1rem; font-size:0.95rem;">Analisi probabilistica partite di calcio</p>', unsafe_allow_html=True)
 
-# Data
-ds = selected_date.strftime("%Y-%m-%d")
-dd = selected_date.strftime("%d/%m/%Y")
-gi = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì","Sabato","Domenica"]
-if selected_date == date.today(): dl = "Oggi"
-elif selected_date == date.today()+timedelta(days=1): dl = "Domani"
-elif selected_date == date.today()-timedelta(days=1): dl = "Ieri"
-else: dl = gi[selected_date.weekday()]
+# === CALENDARIO A PULSANTI ===
+gi_short = ["Lun","Mar","Mer","Gio","Ven","Sab","Dom"]
+gi_full = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì","Sabato","Domenica"]
+
+# Genera 7 giorni: da ieri a +5 giorni
+cal_days = [date.today() + timedelta(days=i) for i in range(-1, 6)]
+
+cal_cols = st.columns(len(cal_days))
+for i, d in enumerate(cal_days):
+    with cal_cols[i]:
+        is_today = d == date.today()
+        is_selected = d == sel
+        
+        if d == date.today(): label = "Oggi"
+        elif d == date.today() + timedelta(days=1): label = "Domani"
+        elif d == date.today() - timedelta(days=1): label = "Ieri"
+        else: label = gi_short[d.weekday()]
+        
+        day_num = d.strftime("%d/%m")
+        btn_label = f"{label}\n{day_num}"
+        
+        if st.button(btn_label, key=f"cal_{d}", use_container_width=True,
+                     type="primary" if is_selected else "secondary"):
+            st.session_state["sel_date"] = d.strftime("%Y-%m-%d")
+            st.rerun()
+
+st.markdown("")  # spacer
+
+# Label data selezionata
+if sel == date.today(): dl = "Oggi"
+elif sel == date.today()+timedelta(days=1): dl = "Domani"
+elif sel == date.today()-timedelta(days=1): dl = "Ieri"
+else: dl = gi_full[sel.weekday()]
+dd = sel.strftime("%d/%m/%Y")
+ds = sel.strftime("%Y-%m-%d")
 
 st.markdown(f'<div style="text-align:center; margin-bottom:1.5rem;"><span class="be-date-pill active">📅 {dl}, {dd}</span></div>', unsafe_allow_html=True)
 
