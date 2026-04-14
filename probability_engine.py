@@ -16,59 +16,35 @@ from math import exp, factorial
 from typing import Dict, Tuple, Optional
 
 # ============================================================
-# PARAMETRI DEL MODELLO
+# PARAMETRI DEL MODELLO (v4 — Aprile 2026)
 # ============================================================
 MAX_GOALS = 10          # Massimo gol per squadra nella matrice
-SOFT_ADJ_WEIGHT = 0.30  # Peso per aggiustamenti forma/rank/momentum (aumentato)
 
-# === v3 FIX: Parametri anti-distorsione ===
+# Dampening delle strength (comprime valori estremi)
 POWER_DAMP = 0.70       # Comprime strength estremi (0.5→0.62, 2.0→1.62)
 SHRINKAGE = 0.15        # Tira strength verso 1.0 del 15%
+
+# Soft adjustment: peso di forma + momentum (rank RIMOSSO — già nelle strength)
+SOFT_ADJ_WEIGHT = 0.25  # Peso per forma/momentum
+
+# Floor gol attesi
 MIN_TOTAL_MU = 1.8      # Gol attesi minimi per partita
 
-# ============================================================
-# CALIBRAZIONE BILANCIATA (basata su 356 scommesse storiche)
-# ============================================================
-# Il modello sovrastima le probabilità alte (80%+ vincono solo 50-60%).
-# Questa calibrazione applica correzioni MODERATE per non appiattire tutto.
+# v4: CALIBRAZIONE A LIVELLO MU (sostituisce la vecchia calibrazione post-hoc)
+# Tira mu verso la media di lega — riduce overconfidence senza rompere coerenza
+MU_SHRINK = 0.85        # 1.0 = nessun shrinkage, 0.0 = tutto appiattito a media lega
 
-def apply_calibration(prob: float, league_id: int, market: str) -> float:
-    """
-    Calibrazione v3 isotonica delle probabilità.
-    Basata su 356 scommesse storiche - corregge la zona 60-70%.
-    """
-    prob_pct = prob * 100
-    
-    # === ISOTONIC CALIBRATION (v3) ===
-    if prob_pct <= 50:
-        calibrated = prob_pct + 2
-    elif prob_pct <= 55:
-        calibrated = prob_pct + 5
-    elif prob_pct <= 60:
-        calibrated = prob_pct
-    elif prob_pct <= 65:
-        # ZONA CRITICA: 65% predetto → solo 45-48% reale
-        calibrated = 45 + (prob_pct - 60) * 0.6
-    elif prob_pct <= 70:
-        calibrated = 48 + (prob_pct - 65) * 0.4
-    elif prob_pct <= 75:
-        calibrated = 50 + (prob_pct - 70) * 4.0
-    elif prob_pct <= 80:
-        calibrated = 70 + (prob_pct - 75) * 1.6
-    elif prob_pct <= 90:
-        calibrated = 78 + (prob_pct - 80) * 0.7
-    else:
-        calibrated = 85 + (prob_pct - 90) * 0.5
-    
-    # Correzione per mercato
-    if market == 'BTTS':
-        calibrated -= 3
-    elif market == 'Over/Under':
-        calibrated -= 2
-    elif market == '1X2' and prob_pct > 80:
-        calibrated -= 4
-    
-    return max(0.01, min(0.99, calibrated / 100))
+# ============================================================
+# CALIBRAZIONE (v4)
+# ============================================================
+# La calibrazione post-hoc con breakpoints manuali (v3) è stata rimossa.
+# Era fragile, aveva discontinuità nella derivata (coefficiente 0.4→4.0),
+# e rompeva la coerenza tra mercati (1X2 calibrato ≠ matrice ≠ O/U calibrato).
+#
+# v4: La calibrazione avviene a livello di μ (expected goals) PRIMA di 
+# costruire la matrice Poisson. Questo garantisce che TUTTE le probabilità
+# derivate (1X2, O/U, BTTS, esatti) siano coerenti tra loro.
+# Metodo: James-Stein shrinkage → tira μ verso la media di lega.
 
 # λ₃ calibrato empiricamente per ogni lega (correlazione gol)
 LEAGUE_LAMBDA3 = {
@@ -388,23 +364,25 @@ def calculate_exact_scores(M: np.ndarray, top_n: int = 10) -> list:
 def calculate_expected_goals(home_stats: Dict, away_stats: Dict, 
                              league_id: int = None) -> Tuple[float, float]:
     """
-    Calcola i gol attesi per entrambe le squadre.
+    Calcola i gol attesi per entrambe le squadre. (v4)
     
-    Formula:
-    μ_home = base_gf_home × attack_home × defense_away × soft_adj_home × rank_diff_factor
-    μ_away = base_gf_away × attack_away × defense_home × soft_adj_away × rank_diff_factor
+    Formula semplificata (4 fattori, non più 7):
+    μ_home = base_gf_home × attack_home × defense_away × soft_adj_home
+    μ_away = base_gf_away × attack_away × defense_home × soft_adj_away
     
-    Args:
-        home_stats: Statistiche squadra casa
-        away_stats: Statistiche squadra trasferta
-        league_id: ID lega per medie specifiche
+    Poi applica James-Stein shrinkage verso la media di lega per ridurre
+    overconfidence senza rompere la coerenza tra mercati.
     
-    Returns:
-        Tuple (mu_home, mu_away)
+    v4 CAMBIAMENTI rispetto a v3:
+    - RIMOSSO rank_diff_boost (era double-counting con rank_factor nelle strength)
+    - RIMOSSO big team bonus (arbitrario, non giustificato dai dati)
+    - RIMOSSO correzione difesa-classifica (sovrascriveva dati reali)
+    - RIMOSSO rank_factor dal soft_adj (già catturato nelle strength)
+    - AGGIUNTO mu shrinkage (James-Stein) come calibrazione pulita
     """
-    # Estrai forze (con clamping + v3: dampening e shrinkage)
+    # Estrai forze (con clamping + dampening + shrinkage bayesiano)
     def _dampen(s):
-        """Applica power dampening + shrinkage bayesiano."""
+        """Applica power dampening + shrinkage verso 1.0."""
         s = clamp_strength(s)
         s = s + SHRINKAGE * (1.0 - s)  # Tira verso 1.0
         if s > 0:
@@ -416,54 +394,26 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
     att_away = _dampen(away_stats.get("attack_away", 1.0))
     def_away = _dampen(away_stats.get("defense_away", 1.0))
     
-    # Calcola soft adjustment (forma + rank + momentum)
-    def soft_adj(form, rank, momentum):
-        """Combina i fattori di aggiustamento."""
+    # Soft adjustment: solo forma + momentum (rank rimosso — già nelle strength)
+    def soft_adj(form, momentum):
+        """Combina forma e momentum recente."""
         if form is None or np.isnan(form):
             form = 1.0
-        if rank is None or np.isnan(rank):
-            rank = 1.0
         if momentum is None or np.isnan(momentum):
             momentum = 1.0
-        
-        combined = (form + rank + momentum) / 3.0
+        combined = (form + momentum) / 2.0
         return 1.0 + SOFT_ADJ_WEIGHT * (combined - 1.0)
     
     adj_home = soft_adj(
         home_stats.get("form_factor", 1.0),
-        home_stats.get("rank_factor", 1.0),
         home_stats.get("momentum", 1.0)
     )
-    
     adj_away = soft_adj(
         away_stats.get("form_factor", 1.0),
-        away_stats.get("rank_factor", 1.0),
         away_stats.get("momentum", 1.0)
     )
     
-    # NUOVO: Fattore basato sulla differenza di classifica
-    rank_home = home_stats.get("rank", 10)
-    rank_away = away_stats.get("rank", 10)
-    
-    if rank_home and rank_away and rank_home > 0 and rank_away > 0:
-        # Differenza posizioni: positivo se casa è meglio in classifica
-        rank_diff = rank_away - rank_home
-        # v3: ridotto da 0.02/0.015 a 0.015/0.012 per meno distorsione
-        rank_diff_boost_home = 1.0 + (rank_diff * 0.015)
-        rank_diff_boost_away = 1.0 - (rank_diff * 0.012)
-        
-        # BONUS BIG TEAM: v3: ridotto da 1.08 a 1.05
-        if rank_home <= 5 and rank_away > 10:
-            rank_diff_boost_home *= 1.05
-        
-        # Clamp più stretto (v3)
-        rank_diff_boost_home = np.clip(rank_diff_boost_home, 0.88, 1.25)
-        rank_diff_boost_away = np.clip(rank_diff_boost_away, 0.75, 1.12)
-    else:
-        rank_diff_boost_home = 1.0
-        rank_diff_boost_away = 1.0
-    
-    # Media gol della lega (se disponibile)
+    # Media gol della lega (base per il calcolo)
     base_gf_home = home_stats.get("league_avg_gf_home", DEFAULT_LEAGUE_AVG["gf_home"])
     base_gf_away = away_stats.get("league_avg_gf_away", DEFAULT_LEAGUE_AVG["gf_away"])
     
@@ -472,26 +422,21 @@ def calculate_expected_goals(home_stats: Dict, away_stats: Dict,
     if base_gf_away is None or np.isnan(base_gf_away) or base_gf_away <= 0:
         base_gf_away = DEFAULT_LEAGUE_AVG["gf_away"]
     
-    # NUOVO: Correzione difesa - se difesa sembra troppo buona per la classifica, correggi
-    # Una squadra bassa in classifica non può avere difesa troppo buona
-    if rank_away and rank_away > 12 and def_away < 0.90:
-        # Squadra nella parte bassa con difesa "troppo buona" - correggi leggermente
-        correction_factor = (rank_away - 12) / 15  # Più graduale
-        def_away = def_away + (0.95 - def_away) * min(correction_factor, 0.4)
+    # Calcolo μ grezzo (4 fattori: base × attacco × difesa × soft_adj)
+    mu_home_raw = base_gf_home * att_home * def_away * adj_home
+    mu_away_raw = base_gf_away * att_away * def_home * adj_away
     
-    if rank_home and rank_home > 12 and def_home < 0.90:
-        correction_factor = (rank_home - 12) / 15
-        def_home = def_home + (0.95 - def_home) * min(correction_factor, 0.4)
-    
-    # Calcolo finale μ
-    mu_home = base_gf_home * att_home * def_away * adj_home * rank_diff_boost_home
-    mu_away = base_gf_away * att_away * def_home * adj_away * rank_diff_boost_away
+    # === v4: JAMES-STEIN SHRINKAGE ===
+    # Tira μ verso la media di lega. Riduce overconfidence in modo liscio.
+    # mu_calibrated = league_avg + MU_SHRINK * (mu_raw - league_avg)
+    mu_home = base_gf_home + MU_SHRINK * (mu_home_raw - base_gf_home)
+    mu_away = base_gf_away + MU_SHRINK * (mu_away_raw - base_gf_away)
     
     # Clamp per stabilità
     mu_home = clamp_lambda(mu_home)
     mu_away = clamp_lambda(mu_away)
     
-    # v3 FIX: Floor minimo gol totali (nessuna partita sotto 1.8 xG)
+    # Floor minimo gol totali
     total_mu = mu_home + mu_away
     if total_mu < MIN_TOTAL_MU:
         scale = MIN_TOTAL_MU / total_mu
@@ -595,39 +540,10 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
     # 8. Calcola probabilità cartellini con aggiustamento arbitro
     probs_cards = calculate_cards_probabilities(home_stats, away_stats, referee_data)
     
-    # 9. APPLICA CALIBRAZIONE per lega e mercato
-    if league_id:
-        # Calibra 1X2
-        probs_1x2["p_home"] = apply_calibration(probs_1x2["p_home"], league_id, "1X2")
-        probs_1x2["p_draw"] = apply_calibration(probs_1x2["p_draw"], league_id, "1X2")
-        probs_1x2["p_away"] = apply_calibration(probs_1x2["p_away"], league_id, "1X2")
-        
-        # Rinormalizza 1X2 (devono sommare a 1)
-        total_1x2 = probs_1x2["p_home"] + probs_1x2["p_draw"] + probs_1x2["p_away"]
-        if total_1x2 > 0:
-            probs_1x2["p_home"] /= total_1x2
-            probs_1x2["p_draw"] /= total_1x2
-            probs_1x2["p_away"] /= total_1x2
-        
-        # Calibra BTTS
-        probs_btts["p_btts_yes"] = apply_calibration(probs_btts["p_btts_yes"], league_id, "BTTS")
-        probs_btts["p_btts_no"] = 1 - probs_btts["p_btts_yes"]
-        
-        # Calibra Over/Under
-        for line in [1.5, 2.5, 3.5, 4.5]:
-            key_over = f"over_{line}"
-            key_under = f"under_{line}"
-            if key_over in probs_ou:
-                probs_ou[key_over] = apply_calibration(probs_ou[key_over], league_id, "Over/Under")
-                probs_ou[key_under] = 1 - probs_ou[key_over]
-        
-        # Calibra Cards
-        for line in [2.5, 3.5, 4.5, 5.5, 6.5]:
-            key_over = f"cards_over_{line}"
-            key_under = f"cards_under_{line}"
-            if key_over in probs_cards:
-                probs_cards[key_over] = apply_calibration(probs_cards[key_over], league_id, "Cards")
-                probs_cards[key_under] = 1 - probs_cards[key_over]
+    # v4: NESSUNA calibrazione post-hoc.
+    # La calibrazione avviene a livello μ (James-Stein shrinkage in calculate_expected_goals).
+    # Questo garantisce che 1X2, O/U, BTTS e risultati esatti siano tutti coerenti
+    # con la stessa matrice Poisson bivariata.
     
     return {
         # Metriche base
@@ -664,58 +580,48 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
 
 def calculate_h2h_adjustment(h2h_data: Dict) -> Tuple[float, float, float]:
     """
-    Calcola gli aggiustamenti basati sugli scontri diretti.
+    Calcola gli aggiustamenti basati sugli scontri diretti. (v4)
     
-    Args:
-        h2h_data: Dict con matches, team1_wins, team2_wins, draws, avg_goals
-    
-    Returns:
-        Tuple (adj_home, adj_away, goals_boost)
+    v4: Il peso dell'H2H scala con il numero di partite disponibili.
+    Con 3 partite l'effetto è minimo (~30%), con 10+ è pieno.
+    Questo evita di dare troppa importanza a campioni troppo piccoli.
     """
     if not h2h_data or h2h_data.get("matches", 0) < 3:
-        # Non abbastanza dati H2H, nessun aggiustamento
         return 1.0, 1.0, 0.0
     
     matches = h2h_data["matches"]
     team1_wins = h2h_data.get("team1_wins", 0)
     team2_wins = h2h_data.get("team2_wins", 0)
-    draws = h2h_data.get("draws", 0)
     avg_goals = h2h_data.get("avg_goals", 2.5)
     
-    # Calcola dominanza (% vittorie)
+    # v4: Peso proporzionale al campione (3 partite → 0.3, 10 → 1.0)
+    sample_weight = min(matches / 10.0, 1.0)
+    
+    # Dominanza nei precedenti
     team1_dominance = team1_wins / matches if matches > 0 else 0.5
     team2_dominance = team2_wins / matches if matches > 0 else 0.5
     
-    # Aggiustamento basato sulla dominanza H2H
-    # Se team1 vince 70% degli H2H -> boost +10%
-    # Se team1 vince 30% degli H2H -> penalità -10%
-    adj_home = 1.0 + (team1_dominance - 0.5) * 0.20  # Max ±10%
-    adj_away = 1.0 + (team2_dominance - 0.5) * 0.20
+    # Aggiustamento scalato per campione
+    adj_home = 1.0 + (team1_dominance - 0.5) * 0.20 * sample_weight
+    adj_away = 1.0 + (team2_dominance - 0.5) * 0.20 * sample_weight
     
-    # Clamp per evitare estremi
-    adj_home = np.clip(adj_home, 0.90, 1.15)
-    adj_away = np.clip(adj_away, 0.90, 1.15)
+    # Clamp
+    adj_home = np.clip(adj_home, 0.92, 1.10)
+    adj_away = np.clip(adj_away, 0.92, 1.10)
     
-    # Goals boost: se media gol H2H è alta, aumenta probabilità Over
-    # Media normale ~2.5 gol, se >3.0 -> boost positivo
-    goals_boost = (avg_goals - 2.5) / 2.5 if avg_goals > 2.5 else 0
-    goals_boost = np.clip(goals_boost, 0, 0.3)  # Max +30%
+    # Goals boost (anche questo scalato per campione)
+    goals_boost = ((avg_goals - 2.5) / 2.5 * sample_weight) if avg_goals > 2.5 else 0
+    goals_boost = np.clip(goals_boost, 0, 0.20)
     
     return adj_home, adj_away, goals_boost
 
 
 def calculate_shots_adjustment(shots_data: Dict) -> float:
     """
-    Calcola l'aggiustamento basato sui tiri.
+    Calcola l'aggiustamento basato sui tiri. (v4)
     
-    Logica: Una squadra che tira molto ha più possibilità di segnare.
-    Media Serie A: ~12-13 tiri per partita
-    
-    Args:
-        shots_data: Dict con shots_avg, shots_on_target_avg
-    
-    Returns:
-        Fattore di aggiustamento (0.90 - 1.15)
+    v4: Ridotto impatto massimo da ±15% a ±10%.
+    I tiri sono indicativi ma rumorosi su 5 partite.
     """
     if not shots_data or shots_data.get("matches_analyzed", 0) == 0:
         return 1.0
@@ -723,25 +629,19 @@ def calculate_shots_adjustment(shots_data: Dict) -> float:
     shots_avg = shots_data.get("shots_avg", 12)
     shots_on_target = shots_data.get("shots_on_target_avg", 4)
     
-    # Media di riferimento (tipica Serie A / top league)
     REFERENCE_SHOTS = 12.0
     REFERENCE_ON_TARGET = 4.0
     
-    # Calcola deviazione dalla media
     shots_factor = shots_avg / REFERENCE_SHOTS if REFERENCE_SHOTS > 0 else 1.0
     on_target_factor = shots_on_target / REFERENCE_ON_TARGET if REFERENCE_ON_TARGET > 0 else 1.0
     
-    # Combina i due fattori (tiri in porta contano di più)
+    # Tiri in porta contano di più
     combined = 0.4 * shots_factor + 0.6 * on_target_factor
     
-    # Trasforma in aggiustamento moderato
-    # combined = 1.0 -> adj = 1.0
-    # combined = 1.5 -> adj = 1.10 (+10%)
-    # combined = 0.5 -> adj = 0.90 (-10%)
-    adjustment = 1.0 + (combined - 1.0) * 0.20
+    # v4: ridotto da 0.20 a 0.15 (max ±10% circa)
+    adjustment = 1.0 + (combined - 1.0) * 0.15
     
-    # Clamp
-    return float(np.clip(adjustment, 0.90, 1.15))
+    return float(np.clip(adjustment, 0.90, 1.10))
 
 
 def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict, 
