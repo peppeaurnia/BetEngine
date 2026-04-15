@@ -511,40 +511,35 @@ def show_top_preds(preds):
     for i in range(n):
         p = preds[i]
         with cols[i]:
-            stars = '⭐' * p['stars'] + '☆' * (5 - p['stars'])
+            stars_str = '⭐' * p['stars'] + '☆' * (5 - p['stars'])
             
-            if p.get('has_odds') and p['odds']:
-                ev = p.get('ev_pct', 0)
+            html = '<div style="background:#161b22; border:1px solid ' + mc[i] + '; border-radius:12px; padding:16px; text-align:center;">'
+            html += '<div style="font-size:1.5rem;">' + medals[i] + '</div>'
+            html += '<div style="font-size:0.9rem; font-weight:600; color:#e6edf3; margin:6px 0;">' + p["icon"] + ' ' + p["name"] + '</div>'
+            html += '<div style="font-size:1.6rem; font-weight:800; color:#e6edf3;">' + f'{p["prob"]:.1f}' + '%</div>'
+            
+            if p.get('has_odds') and p.get('odds'):
+                html += '<div style="font-size:0.85rem; color:#8b949e; margin:4px 0;">🎰 Quota: <strong style="color:#e6edf3;">' + f'{p["odds"]:.2f}' + '</strong></div>'
+                ev = p.get('ev_pct')
                 if ev is not None and ev > 0:
-                    ev_bg = "#238636"
-                    ev_text = f"EV +{ev:.1f}%"
+                    html += '<div style="background:#238636; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">EV +' + f'{ev:.1f}' + '%</div>'
                 elif ev is not None and ev > -3:
-                    ev_bg = "#d29922"
-                    ev_text = f"EV {ev:.1f}%"
+                    html += '<div style="background:#d29922; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">EV ' + f'{ev:.1f}' + '%</div>'
                 else:
-                    ev_bg = "#da3633"
-                    ev_text = f"EV {ev:.1f}%" if ev else "—"
-                odds_line = f'<div style="font-size:0.85rem; color:#8b949e; margin:4px 0;">🎰 Quota: <strong style="color:#e6edf3;">{p["odds"]:.2f}</strong></div>'
-                badge_html = f'<div style="background:{ev_bg}; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">{ev_text}</div>'
+                    html += '<div style="background:#da3633; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">EV —</div>'
             else:
-                odds_line = ''
                 prob = p['prob']
                 if prob >= 70:
-                    bbg, btxt = "#238636", "ALTA FIDUCIA"
+                    html += '<div style="background:#238636; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">ALTA FIDUCIA</div>'
                 elif prob >= 55:
-                    bbg, btxt = "#d29922", "BUONA FIDUCIA"
+                    html += '<div style="background:#d29922; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">BUONA FIDUCIA</div>'
                 else:
-                    bbg, btxt = "#484f58", "POSSIBILE"
-                badge_html = f'<div style="background:{bbg}; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">{btxt}</div>'
+                    html += '<div style="background:#484f58; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">POSSIBILE</div>'
             
-            st.markdown(f'''<div style="background:#161b22; border:1px solid {mc[i]}; border-radius:12px; padding:16px; text-align:center;">
-                <div style="font-size:1.5rem;">{medals[i]}</div>
-                <div style="font-size:0.9rem; font-weight:600; color:#e6edf3; margin:6px 0;">{p['icon']} {p['name']}</div>
-                <div style="font-size:1.6rem; font-weight:800; color:#e6edf3;">{p['prob']:.1f}%</div>
-                {odds_line}
-                {badge_html}
-                <div style="font-size:0.75rem; color:#d29922;">{stars}</div>
-            </div>''', unsafe_allow_html=True)
+            html += '<div style="font-size:0.75rem; color:#d29922;">' + stars_str + '</div>'
+            html += '</div>'
+            
+            st.markdown(html, unsafe_allow_html=True)
 
 # ============================================================
 # ANALISI COMPLETA PARTITA
