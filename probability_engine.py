@@ -34,17 +34,92 @@ MIN_TOTAL_MU = 1.8      # Gol attesi minimi per partita
 # Tira mu verso la media di lega — riduce overconfidence senza rompere coerenza
 MU_SHRINK = 0.85        # 1.0 = nessun shrinkage, 0.0 = tutto appiattito a media lega
 
+# v4: MARKET ANCHORING — mescola probabilità modello con quelle implicite dei bookmaker
+# 35% mercato + 65% modello (calibrato su dati reali Feb 2025: yield -14.3% → +11.7%)
+MARKET_WEIGHT = 0.35
+
 # ============================================================
 # CALIBRAZIONE (v4)
 # ============================================================
 # La calibrazione post-hoc con breakpoints manuali (v3) è stata rimossa.
-# Era fragile, aveva discontinuità nella derivata (coefficiente 0.4→4.0),
-# e rompeva la coerenza tra mercati (1X2 calibrato ≠ matrice ≠ O/U calibrato).
-#
-# v4: La calibrazione avviene a livello di μ (expected goals) PRIMA di 
-# costruire la matrice Poisson. Questo garantisce che TUTTE le probabilità
-# derivate (1X2, O/U, BTTS, esatti) siano coerenti tra loro.
-# Metodo: James-Stein shrinkage → tira μ verso la media di lega.
+# Ora si usa:
+# 1. James-Stein shrinkage a livello μ (in calculate_expected_goals)
+# 2. Market anchoring: blend modello + quote bookmaker (in apply_market_anchoring)
+
+
+def apply_market_anchoring(probs: Dict, odds: Dict) -> Dict:
+    """
+    Mescola le probabilità del modello con quelle implicite dei bookmaker.
+    
+    Il mercato è efficiente ma non perfetto. Il modello cattura pattern che
+    il mercato non vede (forma recente, H2H, tiri). La combinazione dei due
+    è più accurata di entrambi da soli.
+    
+    Formula: p_final = (1 - MARKET_WEIGHT) × p_model + MARKET_WEIGHT × p_market
+    
+    Args:
+        probs: Dict con tutte le probabilità del modello (p_home, p_draw, over_2.5, etc.)
+        odds: Dict con quote bookmaker {'1': 1.85, 'X': 3.40, '2': 4.20, 'O2.5': 1.95, ...}
+    
+    Returns:
+        Dict aggiornato con probabilità ancorate al mercato
+    """
+    if not odds:
+        return probs
+    
+    result = dict(probs)  # Copia
+    w = MARKET_WEIGHT
+    
+    # === 1X2 ===
+    if '1' in odds and 'X' in odds and '2' in odds:
+        # Probabilità implicite (con overround)
+        imp_h = 1.0 / odds['1']
+        imp_d = 1.0 / odds['X']
+        imp_a = 1.0 / odds['2']
+        
+        # Rimuovi overround (normalizza a 1.0)
+        total_imp = imp_h + imp_d + imp_a
+        if total_imp > 0:
+            imp_h /= total_imp
+            imp_d /= total_imp
+            imp_a /= total_imp
+            
+            # Blend
+            result['p_home'] = (1 - w) * probs['p_home'] + w * imp_h
+            result['p_draw'] = (1 - w) * probs['p_draw'] + w * imp_d
+            result['p_away'] = (1 - w) * probs['p_away'] + w * imp_a
+            
+            # Rinormalizza
+            t = result['p_home'] + result['p_draw'] + result['p_away']
+            if t > 0:
+                result['p_home'] /= t
+                result['p_draw'] /= t
+                result['p_away'] /= t
+    
+    # === OVER/UNDER 2.5 ===
+    if 'O2.5' in odds and 'U2.5' in odds:
+        imp_o = 1.0 / odds['O2.5']
+        imp_u = 1.0 / odds['U2.5']
+        total_imp = imp_o + imp_u
+        if total_imp > 0:
+            imp_o /= total_imp
+            imp_u /= total_imp
+            result['over_2.5'] = (1 - w) * probs.get('over_2.5', 0.5) + w * imp_o
+            result['under_2.5'] = (1 - w) * probs.get('under_2.5', 0.5) + w * imp_u
+    
+    # === BTTS ===
+    if 'GG' in odds and 'NG' in odds:
+        imp_gg = 1.0 / odds['GG']
+        imp_ng = 1.0 / odds['NG']
+        total_imp = imp_gg + imp_ng
+        if total_imp > 0:
+            imp_gg /= total_imp
+            imp_ng /= total_imp
+            result['p_btts_yes'] = (1 - w) * probs.get('p_btts_yes', 0.5) + w * imp_gg
+            result['p_btts_no'] = (1 - w) * probs.get('p_btts_no', 0.5) + w * imp_ng
+    
+    result['market_anchored'] = True
+    return result
 
 # λ₃ calibrato empiricamente per ogni lega (correlazione gol)
 LEAGUE_LAMBDA3 = {

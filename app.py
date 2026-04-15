@@ -15,11 +15,18 @@ import base64, os
 # ============================================================
 st.set_page_config(page_title="BetEngine", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
 
-from probability_engine import calculate_match_probabilities, assess_prediction_quality
+from probability_engine import calculate_match_probabilities, assess_prediction_quality, apply_market_anchoring
 from data_fetcher import (LEAGUES, get_match_stats, get_head_to_head, get_team_shots_avg,
                           get_current_season, fetch_todays_fixtures)
 from team_logos import get_logo_path
 from config import API_FOOTBALL_KEY
+
+# Tracker pronostici
+try:
+    from tracker import save_predictions, get_stats as get_tracker_stats
+    TRACKER_AVAILABLE = True
+except ImportError:
+    TRACKER_AVAILABLE = False
 
 try:
     from odds_api import fetch_match_odds
@@ -547,6 +554,7 @@ def show_analysis(fix, lid, lname):
     api = API_FOOTBALL_KEY; season = get_current_season()
     hn = fix["home_name"]; an = fix["away_name"]; hid = fix["home_id"]; aid = fix["away_id"]
     ref = fix.get("referee",""); hd = dn(hn); ad = dn(an)
+    match_date = fix.get("date_raw", st.session_state.get("sel_date", datetime.now().strftime("%Y-%m-%d")))
     
     with st.spinner("📊 Statistiche..."): hs, aws, li = get_match_stats(api, hid, aid, lid, season)
     with st.spinner("🔍 H2H & Tiri..."):
@@ -557,11 +565,24 @@ def show_analysis(fix, lid, lname):
         pr = calculate_match_probabilities(hs, aws, lid, h2h_data=h2h, home_shots=hshots, away_shots=ashots,
             referee_name=ref if ref else None, league_name=lname)
     
+    # Recupera quote reali
+    odds = {}
+    if ODDS_API_AVAILABLE:
+        try: odds = fetch_match_odds(hn, an, lid)
+        except: pass
+    
+    # === MARKET ANCHORING: mescola modello + mercato ===
+    anchored = False
+    if odds:
+        pr = apply_market_anchoring(pr, odds)
+        anchored = True
+    
     q = assess_prediction_quality(hs, aws)
     
-    # Affidabilità
+    # Affidabilità + indicatore anchoring
     qcol = "#238636" if q['score']>=70 else "#d29922" if q['score']>=50 else "#da3633"
-    st.markdown(f'<div style="background:#161b22; border-left:3px solid {qcol}; padding:10px 14px; border-radius:8px; margin-bottom:12px;"><span style="color:#e6edf3; font-weight:600;">Affidabilità: {q["level"]}</span> <span style="color:#8b949e;">({q["score"]}%) — {q["message"]}</span></div>', unsafe_allow_html=True)
+    anch_badge = '<span style="background:#1f6feb; color:#fff; padding:2px 8px; border-radius:10px; font-size:0.7rem; margin-left:8px;">📡 Market Anchored</span>' if anchored else '<span style="background:#484f58; color:#8b949e; padding:2px 8px; border-radius:10px; font-size:0.7rem; margin-left:8px;">Solo Modello</span>'
+    st.markdown(f'<div style="background:#161b22; border-left:3px solid {qcol}; padding:10px 14px; border-radius:8px; margin-bottom:12px;"><span style="color:#e6edf3; font-weight:600;">Affidabilità: {q["level"]}</span> <span style="color:#8b949e;">({q["score"]}%)</span>{anch_badge}</div>', unsafe_allow_html=True)
     
     # xG
     c1, c2, c3 = st.columns(3)
@@ -570,12 +591,26 @@ def show_analysis(fix, lid, lname):
     with c3: st.metric("📈 Gol Attesi", f"{pr['total_expected_goals']:.2f}")
     st.markdown("---")
     
-    # Quote + pronostici
-    odds = {}
-    if ODDS_API_AVAILABLE:
-        try: odds = fetch_match_odds(hn, an, lid)
-        except: pass
-    show_top_preds(calc_top_preds(pr, hd, ad, odds_data=odds))
+    # Pronostici consigliati
+    top_preds = calc_top_preds(pr, hd, ad, odds_data=odds)
+    show_top_preds(top_preds)
+    
+    # === SALVA AUTOMATICAMENTE SU EXCEL ===
+    if TRACKER_AVAILABLE and top_preds:
+        # Pulisci nome lega (rimuovi emoji)
+        clean_league = lname.split(" ", 1)[-1] if lname and " " in lname else lname
+        match_info = {
+            "date": match_date,
+            "league_name": clean_league,
+            "league_id": lid,
+            "home": hd,
+            "away": ad,
+            "anchored": anchored,
+        }
+        saved = save_predictions(top_preds, match_info)
+        if saved > 0:
+            st.markdown(f'<div style="text-align:right; margin-bottom:8px;"><span style="color:#238636; font-size:0.75rem;">✅ {saved} pronostici salvati nel tracker</span></div>', unsafe_allow_html=True)
+    
     st.markdown("---")
     
     # 1X2
