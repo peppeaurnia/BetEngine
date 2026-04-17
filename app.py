@@ -8,25 +8,22 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
-import base64, os
+import base64, os, io
 
 # ============================================================
 # CONFIG
 # ============================================================
 st.set_page_config(page_title="BetEngine", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
 
+# Init tracker in session_state
+if "tracked_preds" not in st.session_state:
+    st.session_state["tracked_preds"] = []
+
 from probability_engine import calculate_match_probabilities, assess_prediction_quality, apply_market_anchoring
 from data_fetcher import (LEAGUES, get_match_stats, get_head_to_head, get_team_shots_avg,
                           get_current_season, fetch_todays_fixtures)
 from team_logos import get_logo_path
 from config import API_FOOTBALL_KEY
-
-# Tracker pronostici
-try:
-    from tracker import save_predictions, get_stats as get_tracker_stats
-    TRACKER_AVAILABLE = True
-except ImportError:
-    TRACKER_AVAILABLE = False
 
 try:
     from odds_api import fetch_match_odds
@@ -590,21 +587,29 @@ def show_analysis(fix, lid, lname):
     top_preds = calc_top_preds(pr, hd, ad, odds_data=odds)
     show_top_preds(top_preds)
     
-    # === SALVA AUTOMATICAMENTE SU EXCEL ===
-    if TRACKER_AVAILABLE and top_preds:
-        # Pulisci nome lega (rimuovi emoji)
+    # === SALVA IN SESSION STATE ===
+    if top_preds:
         clean_league = lname.split(" ", 1)[-1] if lname and " " in lname else lname
-        match_info = {
-            "date": match_date,
-            "league_name": clean_league,
-            "league_id": lid,
-            "home": hd,
-            "away": ad,
-            "anchored": anchored,
-        }
-        saved = save_predictions(top_preds, match_info)
-        if saved > 0:
-            st.markdown(f'<div style="text-align:right; margin-bottom:8px;"><span style="color:#238636; font-size:0.75rem;">✅ {saved} pronostici salvati nel tracker</span></div>', unsafe_allow_html=True)
+        for pred in top_preds:
+            # Evita duplicati
+            key = f"{match_date}_{hd}_{ad}_{pred.get('name','')}"
+            already = any(r.get('_key') == key for r in st.session_state["tracked_preds"])
+            if not already:
+                st.session_state["tracked_preds"].append({
+                    "_key": key,
+                    "Data": match_date,
+                    "Lega": clean_league,
+                    "Casa": hd,
+                    "Trasferta": ad,
+                    "Mercato": pred.get('mt', ''),
+                    "Selezione": pred.get('name', ''),
+                    "Probabilità": round(pred.get('prob', 0), 1),
+                    "Quota": round(pred['odds'], 2) if pred.get('has_odds') and pred.get('odds') else "",
+                    "EV%": round(pred['ev_pct'], 1) if pred.get('ev_pct') is not None else "",
+                    "Stelle": pred.get('stars', 0),
+                    "Anchored": "Sì" if anchored else "No",
+                    "Risultato": "",
+                })
     
     st.markdown("---")
     
@@ -709,6 +714,44 @@ with st.sidebar:
         min_value=date.today()-timedelta(days=7), max_value=date.today()+timedelta(days=14))
     if st.button("Vai", use_container_width=True, key="goto_date"):
         st.session_state["sel_date"] = adv_date.strftime("%Y-%m-%d"); st.rerun()
+    
+    # === TRACKER PRONOSTICI ===
+    st.markdown("---")
+    st.markdown("### 📊 Tracker")
+    n_tracked = len(st.session_state.get("tracked_preds", []))
+    st.markdown(f'<span style="color:#8b949e;">{n_tracked} pronostici salvati in questa sessione</span>', unsafe_allow_html=True)
+    
+    if n_tracked > 0:
+        import pandas as pd
+        # Prepara DataFrame per download
+        rows = [{k: v for k, v in r.items() if k != "_key"} for r in st.session_state["tracked_preds"]]
+        df_export = pd.DataFrame(rows)
+        
+        # Genera Excel in memoria
+        buffer = io.BytesIO()
+        try:
+            df_export.to_excel(buffer, index=False, engine='openpyxl')
+            buffer.seek(0)
+            st.download_button(
+                label="📥 Scarica Excel",
+                data=buffer,
+                file_name=f"pronostici_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        except Exception:
+            # Fallback CSV se openpyxl non disponibile
+            csv_data = df_export.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Scarica CSV",
+                data=csv_data,
+                file_name=f"pronostici_{date.today().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        if st.button("🗑️ Svuota tracker", use_container_width=True):
+            st.session_state["tracked_preds"] = []; st.rerun()
 
 
 # ============================================================
