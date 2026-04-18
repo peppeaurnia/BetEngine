@@ -13,12 +13,7 @@ import base64, os, io
 # ============================================================
 # CONFIG
 # ============================================================
-st.set_page_config(
-    page_title="BetEngine",
-    page_icon="logo.png",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="BetEngine", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
 
 # Init tracker in session_state
 if "tracked_preds" not in st.session_state:
@@ -428,81 +423,150 @@ def show_team_stats(stats, name, is_home):
 
 def calc_top_preds(probs, home, away, odds_data=None):
     """
-    Seleziona i 3 pronostici piu forti del modello. (v4)
+    Seleziona i pronostici consigliati. (v5 — Opzione C)
     
-    - Sempre 3 pronostici (1 per mercato: 1X2, O/U, Cards)
-    - Quote SOLO se reali dai bookmaker
-    - Niente quote inventate, niente EV circolare
+    LOGICA:
+    - Se ci sono quote reali: calcola EV usando probabilità PURE (pre-anchoring).
+      Consiglia solo pronostici con EV ≥ +5% (value bet reale).
+    - Se NON ci sono quote: nessun pronostico consigliato.
+      Il modello mostra probabilità come info, ma non raccomanda puntate.
+    - Massimo 1 pronostico per "famiglia" (1X2, Goals, BTTS, Cards).
+    - Mostra 0-3 pronostici in base alla qualità, mai forzati.
+    
+    Mercati valutati:
+    - 1X2 (casa, pareggio, trasferta)
+    - Over/Under 2.5 gol
+    - BTTS Sì/No
+    - Cartellini Over 3.5 / Over 4.5
     """
+    MIN_EV_PCT = 5.0  # Soglia value bet minima
+    has_odds = odds_data and len(odds_data) > 0
+    
+    # Se non ci sono quote, nessun consiglio di puntata
+    if not has_odds:
+        return []
+    
     candidates = []
     
-    # 1X2
-    ph = probs.get('p_home', 0) * 100
-    pd_ = probs.get('p_draw', 0) * 100
-    pa = probs.get('p_away', 0) * 100
-    candidates.append({'name': f'{home}', 'short': '1', 'prob': ph, 'icon': '🏠', 'mt': '1X2'})
-    candidates.append({'name': 'Pareggio', 'short': 'X', 'prob': pd_, 'icon': '🤝', 'mt': '1X2'})
-    candidates.append({'name': f'{away}', 'short': '2', 'prob': pa, 'icon': '✈️', 'mt': '1X2'})
+    # === 1X2 ===
+    for short, pure_key, disp_key, name, icon in [
+        ('1', 'p_home_pure', 'p_home', home, '🏠'),
+        ('X', 'p_draw_pure', 'p_draw', 'Pareggio', '🤝'),
+        ('2', 'p_away_pure', 'p_away', away, '✈️'),
+    ]:
+        if short not in odds_data:
+            continue
+        p_pure = probs.get(pure_key, probs.get(disp_key, 0))  # fallback se _pure mancante
+        p_display = probs.get(disp_key, 0)
+        odds = float(odds_data[short])
+        ev_pct = (p_pure * odds - 1.0) * 100
+        candidates.append({
+            'name': name, 'short': short, 'icon': icon, 'mt': '1X2', 'family': '1X2',
+            'prob_pure': p_pure * 100, 'prob': p_display * 100,
+            'odds': odds, 'ev_pct': ev_pct,
+        })
     
-    # Over/Under 2.5
-    o25 = probs.get('over_2.5', 0) * 100
-    u25 = probs.get('under_2.5', 0) * 100
-    candidates.append({'name': 'Over 2.5', 'short': 'O2.5', 'prob': o25, 'icon': '⬆️', 'mt': 'OU'})
-    candidates.append({'name': 'Under 2.5', 'short': 'U2.5', 'prob': u25, 'icon': '⬇️', 'mt': 'OU'})
+    # === Over/Under 2.5 ===
+    for short, pure_key, disp_key, name, icon in [
+        ('O2.5', 'over_2.5_pure', 'over_2.5', 'Over 2.5', '⬆️'),
+        ('U2.5', 'under_2.5_pure', 'under_2.5', 'Under 2.5', '⬇️'),
+    ]:
+        if short not in odds_data:
+            continue
+        p_pure = probs.get(pure_key, probs.get(disp_key, 0))
+        p_display = probs.get(disp_key, 0)
+        odds = float(odds_data[short])
+        ev_pct = (p_pure * odds - 1.0) * 100
+        candidates.append({
+            'name': name, 'short': short, 'icon': icon, 'mt': 'OU', 'family': 'Goals',
+            'prob_pure': p_pure * 100, 'prob': p_display * 100,
+            'odds': odds, 'ev_pct': ev_pct,
+        })
     
-    # Cartellini O/U 3.5
-    co = probs.get('cards_over_3.5', 0) * 100
-    cu = probs.get('cards_under_3.5', 0) * 100
-    if co > 0:
-        candidates.append({'name': 'Cart. O3.5', 'short': 'CO3.5', 'prob': co, 'icon': '🟨', 'mt': 'Cards'})
-        candidates.append({'name': 'Cart. U3.5', 'short': 'CU3.5', 'prob': cu, 'icon': '🟨', 'mt': 'Cards'})
+    # === BTTS ===
+    for short, pure_key, disp_key, name, icon in [
+        ('GG', 'p_btts_yes_pure', 'p_btts_yes', 'Gol (GG)', '⚽'),
+        ('NG', 'p_btts_no_pure', 'p_btts_no', 'NoGol (NG)', '🚫'),
+    ]:
+        if short not in odds_data:
+            continue
+        p_pure = probs.get(pure_key, probs.get(disp_key, 0))
+        p_display = probs.get(disp_key, 0)
+        odds = float(odds_data[short])
+        ev_pct = (p_pure * odds - 1.0) * 100
+        candidates.append({
+            'name': name, 'short': short, 'icon': icon, 'mt': 'BTTS', 'family': 'BTTS',
+            'prob_pure': p_pure * 100, 'prob': p_display * 100,
+            'odds': odds, 'ev_pct': ev_pct,
+        })
     
-    # Quote reali se disponibili
-    has_odds = odds_data and len(odds_data) > 0
-    for p in candidates:
-        short = p['short'].replace(" ", "")
-        if has_odds and short in odds_data:
-            p['odds'] = float(odds_data[short])
-            p['has_odds'] = True
-            p['ev_pct'] = (p['prob'] / 100.0 * p['odds'] - 1.0) * 100
-        else:
-            p['odds'] = None
-            p['has_odds'] = False
-            p['ev_pct'] = None
+    # === Cartellini O 3.5 / O 4.5 ===
+    # NOTA: le quote reali cartellini non sono nel dict odds_data standard.
+    # Se non ci sono, questi mercati non vengono proposti.
+    for line, icon in [(3.5, '🟨'), (4.5, '🟨🟨')]:
+        key_over = f'CO{line}'
+        if key_over not in odds_data:
+            continue
+        p = probs.get(f'cards_over_{line}', 0)  # i cartellini non hanno _pure (non ancorati)
+        odds = float(odds_data[key_over])
+        ev_pct = (p * odds - 1.0) * 100
+        candidates.append({
+            'name': f'Cart. O{line}', 'short': key_over, 'icon': icon, 'mt': 'Cards', 'family': 'Cards',
+            'prob_pure': p * 100, 'prob': p * 100,
+            'odds': odds, 'ev_pct': ev_pct,
+        })
     
-    # Stelle basate sulla probabilita
-    for p in candidates:
-        prob = p['prob']
-        if prob >= 75: p['stars'] = 5
-        elif prob >= 65: p['stars'] = 4
-        elif prob >= 55: p['stars'] = 3
-        elif prob >= 50: p['stars'] = 2
+    # === FILTRO: solo value bet con EV >= soglia ===
+    value_bets = [c for c in candidates if c['ev_pct'] >= MIN_EV_PCT]
+    
+    # === RAGGRUPPA PER FAMIGLIA: uno per famiglia, il migliore per EV ===
+    by_family = {}
+    for c in value_bets:
+        fam = c['family']
+        if fam not in by_family or c['ev_pct'] > by_family[fam]['ev_pct']:
+            by_family[fam] = c
+    
+    # === ORDINA PER EV DECRESCENTE ===
+    top = sorted(by_family.values(), key=lambda x: -x['ev_pct'])
+    
+    # Stelle in base a EV
+    for p in top:
+        ev = p['ev_pct']
+        if ev >= 15: p['stars'] = 5
+        elif ev >= 10: p['stars'] = 4
+        elif ev >= 7: p['stars'] = 3
+        elif ev >= 5: p['stars'] = 2
         else: p['stars'] = 1
     
-    # Seleziona 1 per mercato (il piu forte)
-    top = []
-    best_1x2 = max([c for c in candidates if c['mt'] == '1X2'], key=lambda x: x['prob'])
-    top.append(best_1x2)
-    
-    best_ou = max([c for c in candidates if c['mt'] == 'OU'], key=lambda x: x['prob'])
-    top.append(best_ou)
-    
-    cards = [c for c in candidates if c['mt'] == 'Cards']
-    if cards:
-        top.append(max(cards, key=lambda x: x['prob']))
-    else:
-        remaining = [c for c in candidates if c not in top]
-        if remaining:
-            top.append(max(remaining, key=lambda x: abs(x['prob'] - 50)))
-    
-    top.sort(key=lambda x: -abs(x['prob'] - 50))
     return top[:3]
 
 
-def show_top_preds(preds):
-    """Mostra i 3 pronostici. Quote solo se reali."""
+def show_top_preds(preds, has_odds=True):
+    """
+    Mostra i pronostici consigliati (solo value bet).
+    
+    has_odds: se False, mostra un messaggio esplicativo invece dei pronostici.
+    """
     st.markdown("#### 🏆 Pronostici Consigliati")
+    
+    if not has_odds:
+        st.markdown(
+            '<div style="background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px; text-align:center;">'
+            '<div style="color:#8b949e; font-size:0.9rem;">📊 Quote bookmaker non disponibili per questa partita</div>'
+            '<div style="color:#484f58; font-size:0.8rem; margin-top:4px;">Senza quote non è possibile identificare value bet. Consulta le probabilità qui sotto.</div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
+        return
+    
     if not preds:
+        st.markdown(
+            '<div style="background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px; text-align:center;">'
+            '<div style="color:#8b949e; font-size:0.9rem;">🔍 Nessun value bet trovato su questa partita</div>'
+            '<div style="color:#484f58; font-size:0.8rem; margin-top:4px;">Il mercato è in linea col modello. Nessun pronostico con EV ≥ +5%.</div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
         return
     
     n = min(len(preds), 3)
@@ -519,26 +583,23 @@ def show_top_preds(preds):
             html += '<div style="font-size:1.5rem;">' + medals[i] + '</div>'
             html += '<div style="font-size:0.9rem; font-weight:600; color:#e6edf3; margin:6px 0;">' + p["icon"] + ' ' + p["name"] + '</div>'
             html += '<div style="font-size:1.6rem; font-weight:800; color:#e6edf3;">' + f'{p["prob"]:.1f}' + '%</div>'
+            html += '<div style="font-size:0.85rem; color:#8b949e; margin:4px 0;">🎰 Quota: <strong style="color:#e6edf3;">' + f'{p["odds"]:.2f}' + '</strong></div>'
             
-            if p.get('has_odds') and p.get('odds'):
-                html += '<div style="font-size:0.85rem; color:#8b949e; margin:4px 0;">🎰 Quota: <strong style="color:#e6edf3;">' + f'{p["odds"]:.2f}' + '</strong></div>'
-                ev = p.get('ev_pct')
-                if ev is not None and ev > 0:
-                    html += '<div style="background:#238636; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">EV +' + f'{ev:.1f}' + '%</div>'
-                elif ev is not None and ev > -3:
-                    html += '<div style="background:#d29922; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">EV ' + f'{ev:.1f}' + '%</div>'
-                else:
-                    html += '<div style="background:#da3633; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">EV —</div>'
+            # Badge EV colorato
+            ev = p['ev_pct']
+            if ev >= 10:
+                badge_bg = "#238636"
+                badge_label = "STRONG VALUE"
+            elif ev >= 7:
+                badge_bg = "#2ea043"
+                badge_label = "VALUE"
             else:
-                prob = p['prob']
-                if prob >= 70:
-                    html += '<div style="background:#238636; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">ALTA FIDUCIA</div>'
-                elif prob >= 55:
-                    html += '<div style="background:#d29922; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">BUONA FIDUCIA</div>'
-                else:
-                    html += '<div style="background:#484f58; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">POSSIBILE</div>'
+                badge_bg = "#d29922"
+                badge_label = "EDGE"
             
-            html += '<div style="font-size:0.75rem; color:#d29922;">' + stars_str + '</div>'
+            html += '<div style="background:' + badge_bg + '; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">EV +' + f'{ev:.1f}' + '%</div>'
+            html += '<div style="font-size:0.68rem; color:#8b949e; margin-top:2px;">' + badge_label + '</div>'
+            html += '<div style="font-size:0.75rem; color:#d29922; margin-top:4px;">' + stars_str + '</div>'
             html += '</div>'
             
             st.markdown(html, unsafe_allow_html=True)
@@ -590,7 +651,7 @@ def show_analysis(fix, lid, lname):
     
     # Pronostici consigliati
     top_preds = calc_top_preds(pr, hd, ad, odds_data=odds)
-    show_top_preds(top_preds)
+    show_top_preds(top_preds, has_odds=bool(odds))
     
     # === SALVA IN SESSION STATE ===
     if top_preds:
@@ -609,7 +670,7 @@ def show_analysis(fix, lid, lname):
                     "Mercato": pred.get('mt', ''),
                     "Selezione": pred.get('name', ''),
                     "Probabilità": round(pred.get('prob', 0), 1),
-                    "Quota": round(pred['odds'], 2) if pred.get('has_odds') and pred.get('odds') else "",
+                    "Quota": round(pred['odds'], 2) if pred.get('odds') else "",
                     "EV%": round(pred['ev_pct'], 1) if pred.get('ev_pct') is not None else "",
                     "Stelle": pred.get('stars', 0),
                     "Anchored": "Sì" if anchored else "No",

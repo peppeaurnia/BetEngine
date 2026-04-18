@@ -51,45 +51,46 @@ def apply_market_anchoring(probs: Dict, odds: Dict) -> Dict:
     """
     Mescola le probabilità del modello con quelle implicite dei bookmaker.
     
-    Il mercato è efficiente ma non perfetto. Il modello cattura pattern che
-    il mercato non vede (forma recente, H2H, tiri). La combinazione dei due
-    è più accurata di entrambi da soli.
+    v4.1: Conserva SEMPRE le probabilità pure pre-anchoring in chiavi con 
+    suffisso "_pure". Questo permette di:
+    - Mostrare all'utente le probabilità ancorate (più calibrate visivamente)
+    - Calcolare l'EV sulle probabilità pure (segnale indipendente dal mercato)
     
-    Formula: p_final = (1 - MARKET_WEIGHT) × p_model + MARKET_WEIGHT × p_market
+    Senza questa separazione, l'EV calcolato sulle probabilità ancorate è
+    circolare: più il modello è vicino al mercato, meno trova value bet.
     
-    Args:
-        probs: Dict con tutte le probabilità del modello (p_home, p_draw, over_2.5, etc.)
-        odds: Dict con quote bookmaker {'1': 1.85, 'X': 3.40, '2': 4.20, 'O2.5': 1.95, ...}
-    
-    Returns:
-        Dict aggiornato con probabilità ancorate al mercato
+    Formula anchoring: p_final = (1 - MARKET_WEIGHT) × p_model + MARKET_WEIGHT × p_market
     """
-    if not odds:
-        return probs
+    # Salva SEMPRE le probabilità pure (anche se non ci sono quote)
+    result = dict(probs)
     
-    result = dict(probs)  # Copia
+    # Chiavi da preservare come _pure
+    pure_keys = ['p_home', 'p_draw', 'p_away', 
+                 'over_2.5', 'under_2.5', 
+                 'p_btts_yes', 'p_btts_no']
+    for k in pure_keys:
+        if k in probs:
+            result[f'{k}_pure'] = probs[k]
+    
+    if not odds:
+        result['market_anchored'] = False
+        return result
+    
     w = MARKET_WEIGHT
     
     # === 1X2 ===
     if '1' in odds and 'X' in odds and '2' in odds:
-        # Probabilità implicite (con overround)
         imp_h = 1.0 / odds['1']
         imp_d = 1.0 / odds['X']
         imp_a = 1.0 / odds['2']
-        
-        # Rimuovi overround (normalizza a 1.0)
         total_imp = imp_h + imp_d + imp_a
         if total_imp > 0:
             imp_h /= total_imp
             imp_d /= total_imp
             imp_a /= total_imp
-            
-            # Blend
             result['p_home'] = (1 - w) * probs['p_home'] + w * imp_h
             result['p_draw'] = (1 - w) * probs['p_draw'] + w * imp_d
             result['p_away'] = (1 - w) * probs['p_away'] + w * imp_a
-            
-            # Rinormalizza
             t = result['p_home'] + result['p_draw'] + result['p_away']
             if t > 0:
                 result['p_home'] /= t
