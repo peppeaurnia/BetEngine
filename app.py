@@ -13,7 +13,12 @@ import base64, os, io
 # ============================================================
 # CONFIG
 # ============================================================
-st.set_page_config(page_title="BetEngine", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="BetEngine",
+    page_icon="logo.png",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 # Init tracker in session_state
 if "tracked_preds" not in st.session_state:
