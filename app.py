@@ -435,14 +435,14 @@ def calc_top_preds(probs, home, away, odds_data=None):
     - 1X2: ≥ 55% (sotto è incerto)
     - Over/Under 2.5: ≥ 60%
     - BTTS: ≥ 65% (prudente, dato storico di underperformance)
-    - Cartellini O/U 3.5: ≥ 65%
+    - Cartellini O/U 3.5: ≥ 72% (alzato dopo giornata 34: era 65%, win rate reale 60%)
     - Cartellini O/U 4.5: ≥ 70%
     """
     # Soglie per mercato
     TH_1X2 = 55.0
     TH_OU = 60.0
     TH_BTTS = 65.0
-    TH_CARDS_35 = 65.0
+    TH_CARDS_35 = 72.0
     TH_CARDS_45 = 70.0
     
     has_odds = odds_data and len(odds_data) > 0
