@@ -423,27 +423,39 @@ def show_team_stats(stats, name, is_home):
 
 def calc_top_preds(probs, home, away, odds_data=None):
     """
-    Seleziona i pronostici consigliati basandosi sulla probabilità del modello. (v6)
+    Seleziona i pronostici consigliati basandosi sulla probabilità del modello. (v7)
     
     LOGICA:
     - Consiglia un pronostico SOLO se la sua probabilità supera una soglia di mercato
+    - SCARTA la fascia 65-70% (zona zoppa: 41 casi G34+G35 → 51% reale vs 67% atteso)
     - Massimo 1 pronostico per famiglia (1X2, Goals, BTTS, Cards)
     - Mostra 0-3 pronostici, mai forzati
     - Le quote (se disponibili) sono info aggiuntiva nelle card, non un filtro
     
-    SOGLIE (calibrate sulle dinamiche tipiche dei mercati):
-    - 1X2: ≥ 55% (sotto è incerto)
-    - Over/Under 2.5: ≥ 60%
-    - BTTS: ≥ 65% (prudente, dato storico di underperformance)
-    - Cartellini O/U 3.5: ≥ 72% (alzato dopo giornata 34: era 65%, win rate reale 60%)
-    - Cartellini O/U 4.5: ≥ 70%
+    SOGLIE v7 (calibrate su 174 pronostici di G34+G35):
+    - 1X2: ≥ 55% (cumulato 73.8% reale vs 62% atteso, sovraperforma)
+    - Over/Under 2.5: ≥ 65% (alzato da 60%, sotto c'è troppa incertezza)
+    - BTTS: ≥ 65% (cumulato 75% su 8 casi, ancora pochi)
+    - Cartellini O 3.5: ≥ 78% (bias strutturale di -12 punti rilevato su 58 casi)
+    - Cartellini O/U 4.5: ≥ 70% (cumulato 76% su 21 casi, calibrato bene)
+    
+    FILTRO TRASVERSALE: scarta tutti i pronostici nella fascia 65-70%
+    indipendentemente dal mercato (buco di -16 punti rispetto all'atteso).
     """
     # Soglie per mercato
     TH_1X2 = 55.0
-    TH_OU = 60.0
+    TH_OU = 65.0
     TH_BTTS = 65.0
-    TH_CARDS_35 = 72.0
+    TH_CARDS_35 = 78.0
     TH_CARDS_45 = 70.0
+    
+    # Fascia da scartare (probabilità in %)
+    DEAD_ZONE_LOW = 65.0
+    DEAD_ZONE_HIGH = 70.0
+    
+    def in_dead_zone(prob_pct):
+        """True se la probabilità cade nella fascia 65-70% scartata."""
+        return DEAD_ZONE_LOW <= prob_pct < DEAD_ZONE_HIGH
     
     has_odds = odds_data and len(odds_data) > 0
     candidates = []
@@ -457,6 +469,8 @@ def calc_top_preds(probs, home, away, odds_data=None):
         prob = probs.get(key, 0) * 100  # mostra la prob (ancorata se disponibile)
         prob_pure = probs.get(f'{key}_pure', probs.get(key, 0)) * 100  # per EV
         if prob < TH_1X2:
+            continue
+        if in_dead_zone(prob):
             continue
         c = {
             'name': name, 'short': short, 'icon': icon, 'mt': '1X2', 'family': '1X2',
@@ -480,6 +494,8 @@ def calc_top_preds(probs, home, away, odds_data=None):
         prob_pure = probs.get(f'{key}_pure', probs.get(key, 0)) * 100
         if prob < TH_OU:
             continue
+        if in_dead_zone(prob):
+            continue
         c = {
             'name': name, 'short': short, 'icon': icon, 'mt': 'OU', 'family': 'Goals',
             'prob': prob, 'prob_pure': prob_pure,
@@ -502,6 +518,8 @@ def calc_top_preds(probs, home, away, odds_data=None):
         prob_pure = probs.get(f'{key}_pure', probs.get(key, 0)) * 100
         if prob < TH_BTTS:
             continue
+        if in_dead_zone(prob):
+            continue
         c = {
             'name': name, 'short': short, 'icon': icon, 'mt': 'BTTS', 'family': 'BTTS',
             'prob': prob, 'prob_pure': prob_pure,
@@ -521,6 +539,8 @@ def calc_top_preds(probs, home, away, odds_data=None):
             key = f'cards_{side}_{line}'
             prob = probs.get(key, 0) * 100
             if prob < th:
+                continue
+            if in_dead_zone(prob):
                 continue
             c = {
                 'name': f'{name_prefix}{line}', 'short': f'{key_suffix}{line}cards',
