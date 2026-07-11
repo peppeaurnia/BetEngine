@@ -1,0 +1,15 @@
+# ============================================================
+# TEMA BETENGINE — sostituisce la gran parte del CSS custom.
+# Questo file va in: <cartella progetto>/.streamlit/config.toml
+# ============================================================
+
+[theme]
+base = "dark"
+primaryColor = "#2f81f7"
+backgroundColor = "#0d1117"
+secondaryBackgroundColor = "#161b22"
+textColor = "#e6edf3"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"

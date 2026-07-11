@@ -1,28 +1,47 @@
 """
-⚽ BETENGINE v3.1 — Analisi Probabilistica Partite
+⚽ BETENGINE v4.0 — Analisi Probabilistica Partite
 ====================================================
-Design pulito, sfondo solido, partite del giorno con analisi on-click.
+REFACTOR UI (Luglio 2026):
+- Tema gestito da .streamlit/config.toml → CSS custom ridotto dell'80%
+  (niente più selettori su data-testid interni di Streamlit)
+- st.fragment: analizzare una partita NON ricarica più tutta la pagina
+- Analisi organizzata in tab: Pronostici / Mercati / Risultati / Cartellini / Stats
+- Salvataggio nel tracker ESPLICITO (bottone), non più automatico alla visualizzazione
+- Tabelle native st.dataframe con barre di progresso al posto dell'HTML grezzo
+- Colori semantici coerenti: blu = casa, arancio = trasferta, grigio = pareggio.
+  Verde/rosso riservati ai giudizi di valore (EV, forma, severità arbitro)
+- Etichetta "xG" corretta in "Gol attesi (modello)"
+- Risultato della singola analisi cachato in session_state (niente ri-fetch)
+
+Richiede: streamlit >= 1.37 (per st.fragment). Con versioni più vecchie
+l'app funziona comunque, ma con rerun completi.
 """
 
 import streamlit as st
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
-import base64, os, io
+import base64
+import io
+import os
 
 # ============================================================
-# CONFIG
+# CONFIG PAGINA
 # ============================================================
-st.set_page_config(page_title="BetEngine", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="BetEngine",
+    page_icon="⚽",
+    layout="centered",              # max-width nativa ~730px: addio CSS del container
+    initial_sidebar_state="collapsed",
+)
 
-# Init tracker in session_state
-if "tracked_preds" not in st.session_state:
-    st.session_state["tracked_preds"] = []
-
-from probability_engine import calculate_match_probabilities, assess_prediction_quality, apply_market_anchoring
-from data_fetcher import (LEAGUES, get_match_stats, get_head_to_head, get_team_shots_avg,
-                          get_current_season, fetch_todays_fixtures)
-from team_logos import get_logo_path
+from probability_engine import (calculate_match_probabilities,
+                                assess_prediction_quality,
+                                apply_market_anchoring)
+from data_fetcher import (LEAGUES, get_match_stats, get_head_to_head,
+                          get_team_shots_avg, get_current_season,
+                          fetch_todays_fixtures)
 from config import API_FOOTBALL_KEY
 
 try:
@@ -30,6 +49,31 @@ try:
     ODDS_API_AVAILABLE = True
 except ImportError:
     ODDS_API_AVAILABLE = False
+
+# st.fragment: fallback trasparente per Streamlit < 1.37
+fragment = getattr(st, "fragment", None) or (lambda f: f)
+
+# ============================================================
+# PALETTE SEMANTICA
+# ============================================================
+C_HOME = "#2f81f7"   # blu       → squadra di casa
+C_AWAY = "#f78166"   # arancio   → squadra ospite
+C_DRAW = "#8b949e"   # grigio    → pareggio / neutro
+C_GOOD = "#3fb950"   # verde     → giudizio positivo (EV+, forma buona)
+C_BAD  = "#f85149"   # rosso     → giudizio negativo
+C_WARN = "#d29922"   # ambra     → attenzione / medio
+C_TXT  = "#e6edf3"
+C_MUT  = "#8b949e"
+C_BG2  = "#161b22"
+C_BRD  = "#30363d"
+
+# ============================================================
+# STATE
+# ============================================================
+if "tracked_preds" not in st.session_state:
+    st.session_state["tracked_preds"] = []
+if "sel_date" not in st.session_state:
+    st.session_state["sel_date"] = date.today().strftime("%Y-%m-%d")
 
 # ============================================================
 # NOMI ITALIANIZZATI
@@ -62,892 +106,742 @@ DISPLAY_NAMES = {
     "go ahead eagles": "Go Ahead Eagles", "pec zwolle": "PEC Zwolle",
     "heracles almelo": "Heracles", "ajax": "Ajax", "feyenoord": "Feyenoord",
 }
+
+
 def dn(name):
     return DISPLAY_NAMES.get(name.lower().strip(), name) if name else name
 
-def logo_b64(path):
-    if not path: return None
-    try:
-        with open(path, "rb") as f: return base64.b64encode(f.read()).decode('utf-8')
-    except: return None
-
 
 # ============================================================
-# CSS — DESIGN PULITO, SFONDO SOLIDO
+# CSS MINIMO — solo classi custom, nessun hack su data-testid
 # ============================================================
-st.markdown("""
+st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@600;700;800&display=swap');
 
-    /* === SFONDO SOLIDO SCURO === */
-    .stApp {
-        background: #0d1117 !important;
-    }
+    html, body {{ font-family: 'DM Sans', sans-serif; }}
+    h1, h2, h3, h4 {{ font-family: 'Outfit', sans-serif !important; }}
 
-    /* === RESET GENERALE === */
-    html, body, [data-testid="stAppViewContainer"] {
-        width: 100% !important;
-        overflow-x: hidden !important;
-        font-family: 'DM Sans', sans-serif !important;
-    }
+    .be-sub {{ text-align:center; color:{C_MUT}; margin-bottom:1rem; font-size:.95rem; }}
+    .be-total {{ text-align:center; margin-bottom:16px; color:{C_MUT}; font-size:.9rem; }}
+    .be-league {{
+        display:flex; align-items:baseline; gap:8px;
+        padding:12px 0 6px 0; margin-top:18px;
+        border-bottom:1px solid {C_BRD};
+    }}
+    .be-league h3 {{ margin:0; font-size:1.05rem; }}
+    .be-league .count {{ color:{C_MUT}; font-size:.8rem; }}
+    .be-empty {{ text-align:center; padding:60px 20px; }}
+    .be-empty .icon {{ font-size:2.5rem; margin-bottom:12px; }}
+    .be-empty .msg {{ font-size:1.1rem; color:{C_MUT}; }}
+    .be-empty .sub {{ font-size:.85rem; color:#484f58; margin-top:8px; }}
+    .be-footer {{
+        text-align:center; color:#484f58; font-size:.75rem;
+        margin-top:40px; padding:15px 0; border-top:1px solid {C_BRD};
+    }}
 
-    /* === CONTAINER PRINCIPALE === */
-    .main .block-container {
-        background: transparent !important;
-        max-width: 900px;
-        margin: 0 auto;
-        padding: 1rem 1.5rem !important;
-    }
-
-    /* === SIDEBAR === */
-    section[data-testid="stSidebar"] {
-        background: #161b22 !important;
-        border-right: 1px solid #21262d;
-    }
-    section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span,
-    section[data-testid="stSidebar"] label,
-    section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
-        color: #c9d1d9 !important;
-    }
-
-    /* === TESTI === */
-    h1, h2, h3, h4, h5, h6 {
-        color: #e6edf3 !important;
-        font-family: 'Outfit', sans-serif !important;
-        text-shadow: none !important;
-    }
-    p, span, div, li {
-        color: #c9d1d9;
-    }
-    label, label p, label span, label small,
-    [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p,
-    [data-testid="stWidgetLabel"] span {
-        color: #c9d1d9 !important;
-        background: transparent !important;
-    }
-
-    /* === METRICHE === */
-    [data-testid="stMetricValue"] {
-        color: #e6edf3 !important;
-        font-family: 'Outfit', sans-serif !important;
-        text-shadow: none !important;
-    }
-    [data-testid="stMetricLabel"] {
-        color: #8b949e !important;
-    }
-
-    /* === INPUT / SELECT === */
-    .stSelectbox > div > div, [data-baseweb="select"] > div {
-        background-color: #161b22 !important;
-        color: #c9d1d9 !important;
-        border: 1px solid #30363d !important;
-    }
-    [data-baseweb="select"] span, [data-baseweb="select"] div { color: #c9d1d9 !important; }
-    [data-baseweb="popover"], [data-baseweb="popover"] li,
-    [data-baseweb="popover"] div, [data-baseweb="menu"],
-    [data-baseweb="menu"] li {
-        background-color: #161b22 !important;
-        color: #c9d1d9 !important;
-    }
-    .stTextInput > div > div > input,
-    .stNumberInput > div > div > input,
-    .stDateInput > div > div > input {
-        background-color: #161b22 !important;
-        color: #c9d1d9 !important;
-        border: 1px solid #30363d !important;
-    }
-
-    /* === EXPANDER — CARD PARTITA === */
-    [data-testid="stExpander"] {
-        background: #161b22 !important;
-        border: 1px solid #21262d !important;
-        border-radius: 12px !important;
-        margin-bottom: 8px !important;
-        overflow: hidden;
-    }
-    [data-testid="stExpander"] summary {
-        color: #e6edf3 !important;
-        font-weight: 500 !important;
-        padding: 14px 18px !important;
-    }
-    [data-testid="stExpander"] summary:hover {
-        background: #1c2433 !important;
-    }
-    [data-testid="stExpander"] summary span,
-    [data-testid="stExpander"] summary p,
-    [data-testid="stExpander"] summary div {
-        color: #e6edf3 !important;
-    }
-    /* Contenuto espanso */
-    [data-testid="stExpander"] > div > div {
-        background: #0d1117 !important;
-        border-top: 1px solid #21262d !important;
-    }
-    [data-testid="stExpander"] [data-testid="stMarkdownContainer"] p,
-    [data-testid="stExpander"] [data-testid="stMarkdownContainer"] span,
-    [data-testid="stExpander"] [data-testid="stMarkdownContainer"] strong {
-        color: #c9d1d9 !important;
-    }
-
-    /* === ALERTS === */
-    .stAlert { border-radius: 8px !important; }
-    .stAlert p, .stAlert span, .stAlert div { color: #1a1a2e !important; }
-
-    /* === TABELLE === */
-    table { border-collapse: collapse; width: 100%; }
-    table th {
-        background: #238636 !important;
-        color: #ffffff !important;
-        padding: 10px 14px !important;
-        font-size: 0.85rem;
-    }
-    table td {
-        background: #161b22 !important;
-        color: #c9d1d9 !important;
-        padding: 10px 14px !important;
-        border-bottom: 1px solid #21262d !important;
-        font-size: 0.85rem;
-    }
-
-    /* === TABS === */
-    .stTabs [data-baseweb="tab-list"] button { color: #c9d1d9 !important; }
-
-    /* === GRAFICI === */
-    .js-plotly-plot .plotly .bg { fill: transparent !important; }
-
-    /* === NASCONDI UI STREAMLIT === */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    button[title="View fullscreen"] {display: none;}
-    [data-testid="StyledFullScreenButton"] {display: none;}
-
-    /* === TEAM STATS CARD === */
-    .team-stats-card {
-        background: #161b22 !important;
-        border: 1px solid #21262d;
-        border-radius: 10px;
-        padding: 15px;
-    }
-    .team-stats-card * { color: #c9d1d9 !important; }
-    .team-stats-card h4 { color: #e6edf3 !important; }
-
-    /* === CUSTOM CLASSES === */
-    .be-date-pill {
-        display: inline-block;
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 20px;
-        padding: 6px 18px;
-        color: #c9d1d9;
-        font-size: 0.95rem;
-        font-weight: 500;
-    }
-    .be-date-pill.active {
-        background: #238636;
-        border-color: #238636;
-        color: #ffffff;
-    }
-    .be-league {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 12px 0 8px 0;
-        margin-top: 20px;
-        border-bottom: 1px solid #21262d;
-    }
-    .be-league h3 {
-        margin: 0 !important;
-        font-size: 1.05rem !important;
-        color: #e6edf3 !important;
-    }
-    .be-league .count {
-        color: #8b949e;
-        font-size: 0.8rem;
-        font-weight: 400;
-    }
-    .be-empty {
-        text-align: center;
-        padding: 60px 20px;
-    }
-    .be-empty .icon { font-size: 2.5rem; margin-bottom: 12px; }
-    .be-empty .msg { font-size: 1.1rem; color: #8b949e; }
-    .be-empty .sub { font-size: 0.85rem; color: #484f58; margin-top: 8px; }
-    .be-footer {
-        text-align: center;
-        color: #484f58;
-        font-size: 0.75rem;
-        margin-top: 40px;
-        padding: 15px 0;
-        border-top: 1px solid #21262d;
-    }
-    .be-total {
-        text-align: center;
-        margin-bottom: 20px;
-        color: #8b949e;
-        font-size: 0.9rem;
-    }
-
-    /* === RESPONSIVE === */
-    @media (max-width: 768px) {
-        .main .block-container { padding: 0.5rem 0.75rem !important; }
-        h1 { font-size: 1.5rem !important; }
-        h2 { font-size: 1.2rem !important; }
-        h3 { font-size: 1rem !important; }
-    }
-    
-    /* === CALENDAR BUTTONS === */
-    /* Rendi i bottoni del calendario più compatti */
-    [data-testid="stHorizontalBlock"] .stButton > button {
-        font-size: 0.8rem !important;
-        padding: 6px 4px !important;
-        line-height: 1.3 !important;
-        border-radius: 10px !important;
-        min-height: 0 !important;
-    }
-    [data-testid="stHorizontalBlock"] .stButton > button[kind="primary"] {
-        background: #238636 !important;
-        border-color: #238636 !important;
-        color: #ffffff !important;
-    }
-    [data-testid="stHorizontalBlock"] .stButton > button[kind="primary"] p {
-        color: #ffffff !important;
-    }
-    [data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"] {
-        background: #161b22 !important;
-        border: 1px solid #30363d !important;
-        color: #c9d1d9 !important;
-    }
-    [data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"] p {
-        color: #c9d1d9 !important;
-    }
-    [data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"]:hover {
-        background: #1c2433 !important;
-        border-color: #1f6feb !important;
-    }
+    .be-card {{
+        background:{C_BG2}; border:1px solid {C_BRD};
+        border-radius:12px; padding:16px; text-align:center;
+    }}
+    .be-badge {{
+        display:inline-block; padding:3px 12px; border-radius:20px;
+        font-size:.72rem; font-weight:600; letter-spacing:.03em;
+        color:#fff;
+    }}
+    .be-chip {{
+        color:#fff; padding:8px 4px; border-radius:8px;
+        text-align:center; margin:4px 0;
+    }}
+    .be-chip .score {{ font-size:1.25rem; font-weight:700; }}
+    .be-chip .pct {{ font-size:.78rem; opacity:.85; }}
+    .be-note {{
+        background:{C_BG2}; border-left:3px solid {C_BRD};
+        padding:10px 14px; border-radius:8px; margin-bottom:12px;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
 
 # ============================================================
-# FUNZIONI GRAFICI
+# GRAFICI
 # ============================================================
+CHART_LAYOUT = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color=C_TXT, family="DM Sans"))
+PLOTLY_CFG = {"displayModeBar": False, "staticPlot": False}
 
-CHART_LAYOUT = dict(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-    font=dict(color='#c9d1d9', family='DM Sans'))
 
 def chart_1x2(probs, home, away):
-    vals = [probs.get(k,0)*100 for k in ['p_home','p_draw','p_away']]
-    fig = go.Figure(go.Bar(x=vals, y=[f'{home}','Pareggio',f'{away}'], orientation='h',
-        marker_color=['#238636','#d29922','#da3633'],
-        text=[f'{v:.1f}%' for v in vals], textposition='inside', textfont=dict(size=14, color='white')))
-    fig.update_layout(**CHART_LAYOUT, height=200, margin=dict(l=10, r=10, t=10, b=10),
-        xaxis=dict(range=[0,100], showticklabels=False, gridcolor='#21262d'),
-        yaxis=dict(gridcolor='#21262d'), showlegend=False)
+    """Una sola barra impilata al 100%: la ripartizione si legge a colpo d'occhio."""
+    segs = [
+        (f"1 · {home}", probs.get("p_home", 0) * 100, C_HOME),
+        ("X · Pareggio", probs.get("p_draw", 0) * 100, C_DRAW),
+        (f"2 · {away}", probs.get("p_away", 0) * 100, C_AWAY),
+    ]
+    fig = go.Figure()
+    for name, val, color in segs:
+        fig.add_trace(go.Bar(
+            y=[""], x=[val], name=name, orientation="h",
+            marker=dict(color=color),
+            text=f"{val:.1f}%", textposition="inside", insidetextanchor="middle",
+            textfont=dict(size=14, color="white"),
+            hovertemplate=f"{name}: {val:.1f}%<extra></extra>",
+        ))
+    fig.update_layout(**CHART_LAYOUT, barmode="stack", height=120,
+                      margin=dict(l=0, r=0, t=0, b=0),
+                      xaxis=dict(range=[0, 100], visible=False),
+                      yaxis=dict(visible=False),
+                      legend=dict(orientation="h", yanchor="top", y=-0.05,
+                                  x=0.5, xanchor="center"))
     return fig
 
-def chart_ou(probs):
-    lines = [1.5, 2.5, 3.5, 4.5]
-    fig = go.Figure()
-    fig.add_trace(go.Bar(name='OVER', x=[f'{l}' for l in lines],
-        y=[probs.get(f"over_{l}",0)*100 for l in lines], marker_color='#238636',
-        text=[f'{probs.get(f"over_{l}",0)*100:.1f}%' for l in lines], textposition='outside'))
-    fig.add_trace(go.Bar(name='UNDER', x=[f'{l}' for l in lines],
-        y=[probs.get(f"under_{l}",0)*100 for l in lines], marker_color='#da3633',
-        text=[f'{probs.get(f"under_{l}",0)*100:.1f}%' for l in lines], textposition='outside'))
-    fig.update_layout(**CHART_LAYOUT, height=320, barmode='group',
-        xaxis=dict(gridcolor='#21262d'), yaxis=dict(range=[0,100], gridcolor='#21262d'),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=10, r=10, t=10, b=30))
+
+def chart_over_lines(probs, lines, key_fmt, color):
+    """Solo la probabilità Over per linea (Under = complemento, è ridondante).
+    Linea tratteggiata al 50% come riferimento."""
+    vals = [probs.get(key_fmt.format(l), 0) * 100 for l in lines]
+    fig = go.Figure(go.Bar(
+        x=[f"Over {l}" for l in lines], y=vals, marker_color=color,
+        text=[f"{v:.1f}%" for v in vals], textposition="outside",
+        hovertemplate="%{x}: %{y:.1f}%<extra></extra>",
+    ))
+    fig.add_hline(y=50, line_dash="dot", line_color="#484f58",
+                  annotation_text="50%", annotation_font_color=C_MUT)
+    fig.update_layout(**CHART_LAYOUT, height=280, showlegend=False,
+                      xaxis=dict(gridcolor="#21262d"),
+                      yaxis=dict(range=[0, 105], gridcolor="#21262d",
+                                 ticksuffix="%"),
+                      margin=dict(l=10, r=10, t=20, b=10))
     return fig
 
-def chart_cards(probs):
-    lines = [2.5, 3.5, 4.5, 5.5, 6.5]
-    fig = go.Figure()
-    fig.add_trace(go.Bar(name='OVER', x=[f'{l}' for l in lines],
-        y=[probs.get(f"cards_over_{l}",0)*100 for l in lines], marker_color='#d29922',
-        text=[f'{probs.get(f"cards_over_{l}",0)*100:.1f}%' for l in lines], textposition='outside'))
-    fig.add_trace(go.Bar(name='UNDER', x=[f'{l}' for l in lines],
-        y=[probs.get(f"cards_under_{l}",0)*100 for l in lines], marker_color='#8957e5',
-        text=[f'{probs.get(f"cards_under_{l}",0)*100:.1f}%' for l in lines], textposition='outside'))
-    fig.update_layout(**CHART_LAYOUT, height=320, barmode='group',
-        xaxis=dict(gridcolor='#21262d'), yaxis=dict(range=[0,100], gridcolor='#21262d'),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=10, r=10, t=10, b=30))
-    return fig
 
 def chart_heatmap(matrix, home, away):
-    M = matrix[:7,:7]*100
-    fig = go.Figure(data=go.Heatmap(z=M, x=[str(i) for i in range(7)], y=[str(i) for i in range(7)],
-        colorscale=[[0,'#0d1117'],[0.5,'#1f6feb'],[1,'#58a6ff']],
-        text=[[f'{M[i,j]:.1f}%' if M[i,j]>0.5 else '' for j in range(7)] for i in range(7)],
-        texttemplate='%{text}', textfont=dict(size=10, color='white'),
-        hovertemplate=f'{home} %{{y}} - %{{x}} {away}<br>Prob: %{{z:.2f}}%<extra></extra>'))
-    fig.update_layout(**CHART_LAYOUT, height=380, xaxis_title=f"Gol {away}", yaxis_title=f"Gol {home}",
-        xaxis=dict(gridcolor='#21262d'), yaxis=dict(autorange='reversed', gridcolor='#21262d'),
-        margin=dict(l=10, r=10, t=10, b=40))
+    M = matrix[:7, :7] * 100
+    fig = go.Figure(go.Heatmap(
+        z=M, x=[str(i) for i in range(7)], y=[str(i) for i in range(7)],
+        colorscale=[[0, "#0d1117"], [0.5, "#1f6feb"], [1, "#58a6ff"]],
+        text=[[f"{M[i, j]:.1f}%" if M[i, j] > 0.5 else "" for j in range(7)]
+              for i in range(7)],
+        texttemplate="%{text}", textfont=dict(size=10, color="white"),
+        hovertemplate=f"{home} %{{y}} - %{{x}} {away}<br>Prob: %{{z:.2f}}%<extra></extra>",
+        showscale=False,
+    ))
+    fig.update_layout(**CHART_LAYOUT, height=380,
+                      xaxis_title=f"Gol {away}", yaxis_title=f"Gol {home}",
+                      yaxis=dict(autorange="reversed"),
+                      margin=dict(l=10, r=10, t=10, b=40))
     return fig
 
 
 # ============================================================
-# FUNZIONI DISPLAY
+# TABELLE NATIVE (st.dataframe + ProgressColumn)
 # ============================================================
 
-def show_exact_scores(scores):
-    cols = st.columns(5)
-    for i, (hg, ag, prob) in enumerate(scores[:10]):
-        with cols[i%5]:
-            c = "#238636" if hg > ag else "#da3633" if ag > hg else "#484f58"
-            st.markdown(f'<div style="background:{c}; color:#fff; padding:8px; border-radius:8px; text-align:center; margin:4px 0;"><div style="font-size:1.3rem; font-weight:700;">{hg}-{ag}</div><div style="font-size:0.8rem; opacity:0.85;">{prob:.1f}%</div></div>', unsafe_allow_html=True)
+def ou_dataframe(probs, lines, over_fmt, under_fmt):
+    rows = []
+    for l in lines:
+        op = probs.get(over_fmt.format(l), 0) * 100
+        up = probs.get(under_fmt.format(l), 0) * 100
+        rows.append({
+            "Linea": f"{l}",
+            "Over": op,
+            "Under": up,
+            "Quota O": round(100 / op, 2) if op > 0 else None,
+            "Quota U": round(100 / up, 2) if up > 0 else None,
+        })
+    df = pd.DataFrame(rows)
+    st.dataframe(
+        df, hide_index=True, use_container_width=True,
+        column_config={
+            "Over": st.column_config.ProgressColumn(
+                "Over", format="%.1f%%", min_value=0, max_value=100),
+            "Under": st.column_config.ProgressColumn(
+                "Under", format="%.1f%%", min_value=0, max_value=100),
+            "Quota O": st.column_config.NumberColumn("Quota O", format="%.2f"),
+            "Quota U": st.column_config.NumberColumn("Quota U", format="%.2f"),
+        },
+    )
 
-def show_team_stats(stats, name, is_home):
-    pos = "Casa" if is_home else "Trasferta"
-    att = stats.get("attack_home" if is_home else "attack_away", 1.0)
-    df = stats.get("defense_home" if is_home else "defense_away", 1.0)
-    form = stats.get("form_factor", 1.0)
-    rank = stats.get("rank", "N/A")
-    fs = stats.get("form_string", "")
-    ac = "#238636" if att > 1.1 else "#da3633" if att < 0.9 else "#d29922"
-    dc = "#238636" if df < 0.9 else "#da3633" if df > 1.1 else "#d29922"
-    border = "#1f6feb" if is_home else "#da3633"
-    st.markdown(f'''<div class="team-stats-card" style="border-left:3px solid {border};">
-        <h4 style="margin:0 0 10px 0; font-size:1rem;">{name}</h4>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-            <div><small style="font-size:0.7rem; color:#8b949e !important;">Att. ({pos})</small><div style="font-size:1.1rem; color:{ac} !important; font-weight:700;">{att:.2f}</div></div>
-            <div><small style="font-size:0.7rem; color:#8b949e !important;">Dif. ({pos})</small><div style="font-size:1.1rem; color:{dc} !important; font-weight:700;">{df:.2f}</div></div>
-            <div><small style="font-size:0.7rem; color:#8b949e !important;">Forma</small><div style="font-size:1rem;">{form:.2f} <small style="color:#8b949e !important;">({fs[-5:] if fs else "—"})</small></div></div>
-            <div><small style="font-size:0.7rem; color:#8b949e !important;">Classifica</small><div style="font-size:1.1rem;">{rank}°</div></div>
-        </div></div>''', unsafe_allow_html=True)
 
-
+# ============================================================
+# PRONOSTICI CONSIGLIATI (logica del modello INVARIATA — v7)
+# ============================================================
 
 def calc_top_preds(probs, home, away, odds_data=None):
     """
     Seleziona i pronostici consigliati basandosi sulla probabilità del modello. (v7)
-    
+
     LOGICA:
     - Consiglia un pronostico SOLO se la sua probabilità supera una soglia di mercato
-    - SCARTA la fascia 65-70% (zona zoppa: 41 casi G34+G35 → 51% reale vs 67% atteso)
+    - SCARTA la fascia 65-70% (zona zoppa rilevata su G34+G35)
     - Massimo 1 pronostico per famiglia (1X2, Goals, BTTS, Cards)
     - Mostra 0-3 pronostici, mai forzati
     - Le quote (se disponibili) sono info aggiuntiva nelle card, non un filtro
-    
-    SOGLIE v7 (calibrate su 174 pronostici di G34+G35):
-    - 1X2: ≥ 55% (cumulato 73.8% reale vs 62% atteso, sovraperforma)
-    - Over/Under 2.5: ≥ 65% (alzato da 60%, sotto c'è troppa incertezza)
-    - BTTS: ≥ 65% (cumulato 75% su 8 casi, ancora pochi)
-    - Cartellini O 3.5: ≥ 78% (bias strutturale di -12 punti rilevato su 58 casi)
-    - Cartellini O/U 4.5: ≥ 70% (cumulato 76% su 21 casi, calibrato bene)
-    
-    FILTRO TRASVERSALE: scarta tutti i pronostici nella fascia 65-70%
-    indipendentemente dal mercato (buco di -16 punti rispetto all'atteso).
     """
-    # Soglie per mercato
     TH_1X2 = 55.0
     TH_OU = 65.0
     TH_BTTS = 65.0
     TH_CARDS_35 = 78.0
     TH_CARDS_45 = 70.0
-    
-    # Fascia da scartare (probabilità in %)
+
     DEAD_ZONE_LOW = 65.0
     DEAD_ZONE_HIGH = 70.0
-    
-    def in_dead_zone(prob_pct):
-        """True se la probabilità cade nella fascia 65-70% scartata."""
-        return DEAD_ZONE_LOW <= prob_pct < DEAD_ZONE_HIGH
-    
+
+    def in_dead_zone(p):
+        return DEAD_ZONE_LOW <= p < DEAD_ZONE_HIGH
+
     has_odds = odds_data and len(odds_data) > 0
     candidates = []
-    
-    # === 1X2 ===
-    for short, key, name, icon in [
-        ('1', 'p_home', home, '🏠'),
-        ('X', 'p_draw', 'Pareggio', '🤝'),
-        ('2', 'p_away', away, '✈️'),
-    ]:
-        prob = probs.get(key, 0) * 100  # mostra la prob (ancorata se disponibile)
-        prob_pure = probs.get(f'{key}_pure', probs.get(key, 0)) * 100  # per EV
-        if prob < TH_1X2:
-            continue
-        if in_dead_zone(prob):
-            continue
-        c = {
-            'name': name, 'short': short, 'icon': icon, 'mt': '1X2', 'family': '1X2',
-            'prob': prob, 'prob_pure': prob_pure,
-            'threshold': TH_1X2,
-        }
-        if has_odds and short in odds_data:
-            c['odds'] = float(odds_data[short])
-            c['ev_pct'] = (prob_pure / 100.0 * c['odds'] - 1.0) * 100
-        else:
-            c['odds'] = None
-            c['ev_pct'] = None
-        candidates.append(c)
-    
-    # === Over/Under 2.5 ===
-    for short, key, name, icon in [
-        ('O2.5', 'over_2.5', 'Over 2.5', '⬆️'),
-        ('U2.5', 'under_2.5', 'Under 2.5', '⬇️'),
-    ]:
+
+    def add_candidate(short, key, name, mt, family, threshold, anchorable=True):
         prob = probs.get(key, 0) * 100
-        prob_pure = probs.get(f'{key}_pure', probs.get(key, 0)) * 100
-        if prob < TH_OU:
-            continue
-        if in_dead_zone(prob):
-            continue
-        c = {
-            'name': name, 'short': short, 'icon': icon, 'mt': 'OU', 'family': 'Goals',
-            'prob': prob, 'prob_pure': prob_pure,
-            'threshold': TH_OU,
-        }
+        prob_pure = probs.get(f"{key}_pure", probs.get(key, 0)) * 100 if anchorable else prob
+        if prob < threshold or in_dead_zone(prob):
+            return
+        c = {"name": name, "short": short, "mt": mt, "family": family,
+             "prob": prob, "prob_pure": prob_pure, "threshold": threshold,
+             "odds": None, "ev_pct": None}
         if has_odds and short in odds_data:
-            c['odds'] = float(odds_data[short])
-            c['ev_pct'] = (prob_pure / 100.0 * c['odds'] - 1.0) * 100
-        else:
-            c['odds'] = None
-            c['ev_pct'] = None
+            c["odds"] = float(odds_data[short])
+            c["ev_pct"] = (prob_pure / 100.0 * c["odds"] - 1.0) * 100
         candidates.append(c)
-    
-    # === BTTS ===
-    for short, key, name, icon in [
-        ('GG', 'p_btts_yes', 'Gol (GG)', '⚽'),
-        ('NG', 'p_btts_no', 'NoGol (NG)', '🚫'),
-    ]:
-        prob = probs.get(key, 0) * 100
-        prob_pure = probs.get(f'{key}_pure', probs.get(key, 0)) * 100
-        if prob < TH_BTTS:
-            continue
-        if in_dead_zone(prob):
-            continue
-        c = {
-            'name': name, 'short': short, 'icon': icon, 'mt': 'BTTS', 'family': 'BTTS',
-            'prob': prob, 'prob_pure': prob_pure,
-            'threshold': TH_BTTS,
-        }
-        if has_odds and short in odds_data:
-            c['odds'] = float(odds_data[short])
-            c['ev_pct'] = (prob_pure / 100.0 * c['odds'] - 1.0) * 100
-        else:
-            c['odds'] = None
-            c['ev_pct'] = None
-        candidates.append(c)
-    
-    # === Cartellini Over/Under 3.5 e 4.5 ===
-    for line, th, icon in [(3.5, TH_CARDS_35, '🟨'), (4.5, TH_CARDS_45, '🟨🟨')]:
-        for side, key_suffix, name_prefix in [('over', 'O', 'Cart. O'), ('under', 'U', 'Cart. U')]:
-            key = f'cards_{side}_{line}'
-            prob = probs.get(key, 0) * 100
-            if prob < th:
-                continue
-            if in_dead_zone(prob):
-                continue
-            c = {
-                'name': f'{name_prefix}{line}', 'short': f'{key_suffix}{line}cards',
-                'icon': icon, 'mt': 'Cards', 'family': 'Cards',
-                'prob': prob, 'prob_pure': prob,  # cards non sono ancorate
-                'threshold': th,
-            }
-            c['odds'] = None
-            c['ev_pct'] = None
-            candidates.append(c)
-    
-    # === RAGGRUPPA PER FAMIGLIA: uno per famiglia (il migliore per prob) ===
+
+    # 1X2
+    add_candidate("1", "p_home", home, "1X2", "1X2", TH_1X2)
+    add_candidate("X", "p_draw", "Pareggio", "1X2", "1X2", TH_1X2)
+    add_candidate("2", "p_away", away, "1X2", "1X2", TH_1X2)
+    # Over/Under 2.5
+    add_candidate("O2.5", "over_2.5", "Over 2.5", "OU", "Goals", TH_OU)
+    add_candidate("U2.5", "under_2.5", "Under 2.5", "OU", "Goals", TH_OU)
+    # BTTS
+    add_candidate("GG", "p_btts_yes", "Gol (GG)", "BTTS", "BTTS", TH_BTTS)
+    add_candidate("NG", "p_btts_no", "NoGol (NG)", "BTTS", "BTTS", TH_BTTS)
+    # Cartellini
+    for line, th in [(3.5, TH_CARDS_35), (4.5, TH_CARDS_45)]:
+        for side, pfx in [("over", "Cart. O"), ("under", "Cart. U")]:
+            add_candidate(f"{side[0].upper()}{line}cards", f"cards_{side}_{line}",
+                          f"{pfx}{line}", "Cards", "Cards", th, anchorable=False)
+
+    # Uno per famiglia (il migliore per probabilità)
     by_family = {}
     for c in candidates:
-        fam = c['family']
-        if fam not in by_family or c['prob'] > by_family[fam]['prob']:
+        fam = c["family"]
+        if fam not in by_family or c["prob"] > by_family[fam]["prob"]:
             by_family[fam] = c
-    
-    # === ORDINA PER CONFIDENZA (prob decrescente) ===
-    top = sorted(by_family.values(), key=lambda x: -x['prob'])
-    
-    # Stelle in base alla probabilità
+
+    top = sorted(by_family.values(), key=lambda x: -x["prob"])
+
     for p in top:
-        prob = p['prob']
-        if prob >= 80: p['stars'] = 5
-        elif prob >= 72: p['stars'] = 4
-        elif prob >= 65: p['stars'] = 3
-        elif prob >= 58: p['stars'] = 2
-        else: p['stars'] = 1
-    
+        prob = p["prob"]
+        if prob >= 80:   p["stars"] = 5
+        elif prob >= 72: p["stars"] = 4
+        elif prob >= 65: p["stars"] = 3
+        elif prob >= 58: p["stars"] = 2
+        else:            p["stars"] = 1
+
     return top[:3]
 
 
-def show_top_preds(preds, has_odds=True):
-    """
-    Mostra i pronostici consigliati dal modello.
-    Le quote (se presenti) sono info aggiuntiva, non un filtro.
-    """
-    st.markdown("#### 🏆 Pronostici Consigliati")
-    
+def show_top_preds(preds):
+    st.markdown("##### Pronostici consigliati")
+
     if not preds:
         st.markdown(
-            '<div style="background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px; text-align:center;">'
-            '<div style="color:#8b949e; font-size:0.9rem;">🔍 Nessun pronostico con confidenza sufficiente</div>'
-            '<div style="color:#484f58; font-size:0.8rem; margin-top:4px;">Il modello non ha individuato mercati con probabilità superiore alle soglie minime.</div>'
-            '</div>',
-            unsafe_allow_html=True
-        )
+            f'<div class="be-card"><div style="color:{C_MUT}; font-size:.9rem;">'
+            f'Nessun pronostico con confidenza sufficiente</div>'
+            f'<div style="color:#484f58; font-size:.8rem; margin-top:4px;">'
+            f'Nessun mercato supera le soglie minime del modello.</div></div>',
+            unsafe_allow_html=True)
         return
-    
+
     n = min(len(preds), 3)
     cols = [st.columns([1, 2, 1])[1]] if n == 1 else st.columns(n)
-    medals = ['🥇', '🥈', '🥉']
-    mc = ['#d29922', '#8b949e', '#da7b30']
-    
+
     for i in range(n):
         p = preds[i]
         with cols[i]:
-            stars_str = '⭐' * p['stars'] + '☆' * (5 - p['stars'])
-            
-            # Badge confidenza basato sulla probabilità
-            prob = p['prob']
+            prob = p["prob"]
             if prob >= 75:
-                badge_bg = "#238636"
-                badge_label = "ALTA FIDUCIA"
+                badge_bg, badge_label = C_GOOD, "ALTA FIDUCIA"
             elif prob >= 65:
-                badge_bg = "#2ea043"
-                badge_label = "BUONA FIDUCIA"
+                badge_bg, badge_label = "#2ea043", "BUONA FIDUCIA"
             else:
-                badge_bg = "#d29922"
-                badge_label = "FIDUCIA MEDIA"
-            
-            html = '<div style="background:#161b22; border:1px solid ' + mc[i] + '; border-radius:12px; padding:16px; text-align:center;">'
-            html += '<div style="font-size:1.5rem;">' + medals[i] + '</div>'
-            html += '<div style="font-size:0.9rem; font-weight:600; color:#e6edf3; margin:6px 0;">' + p["icon"] + ' ' + p["name"] + '</div>'
-            html += '<div style="font-size:1.6rem; font-weight:800; color:#e6edf3;">' + f'{p["prob"]:.1f}' + '%</div>'
-            html += '<div style="background:' + badge_bg + '; color:#fff; display:inline-block; padding:3px 12px; border-radius:20px; font-size:0.75rem; font-weight:600; margin:4px 0;">' + badge_label + '</div>'
-            
-            # Info quota + EV (se disponibile) — come dato opzionale
-            if p.get('odds') is not None:
-                ev = p.get('ev_pct')
-                ev_color = "#238636" if ev and ev > 5 else "#d29922" if ev and ev > -3 else "#8b949e"
-                ev_str = f'EV {ev:+.1f}%' if ev is not None else ''
-                html += '<div style="font-size:0.78rem; color:#8b949e; margin-top:6px; padding-top:6px; border-top:1px solid #21262d;">'
-                html += '🎰 Quota <strong style="color:#e6edf3;">' + f'{p["odds"]:.2f}' + '</strong>'
+                badge_bg, badge_label = C_WARN, "FIDUCIA MEDIA"
+
+            conf_dots = "●" * p["stars"] + "○" * (5 - p["stars"])
+
+            html = '<div class="be-card">'
+            html += (f'<div style="font-size:.78rem; color:{C_MUT}; '
+                     f'text-transform:uppercase; letter-spacing:.05em;">{p["mt"]}</div>')
+            html += (f'<div style="font-size:.95rem; font-weight:600; color:{C_TXT}; '
+                     f'margin:6px 0;">{p["name"]}</div>')
+            html += (f'<div style="font-size:1.6rem; font-weight:800; '
+                     f'color:{C_TXT};">{prob:.1f}%</div>')
+            html += (f'<div class="be-badge" style="background:{badge_bg}; '
+                     f'margin:6px 0;">{badge_label}</div>')
+
+            if p.get("odds") is not None:
+                ev = p.get("ev_pct")
+                ev_color = C_GOOD if ev and ev > 5 else C_WARN if ev and ev > -3 else C_MUT
+                ev_str = f"EV {ev:+.1f}%" if ev is not None else ""
+                html += (f'<div style="font-size:.78rem; color:{C_MUT}; margin-top:6px; '
+                         f'padding-top:6px; border-top:1px solid #21262d;">'
+                         f'Quota <strong style="color:{C_TXT};">{p["odds"]:.2f}</strong>')
                 if ev_str:
-                    html += '  ·  <span style="color:' + ev_color + '; font-weight:600;">' + ev_str + '</span>'
-                html += '</div>'
-            
-            html += '<div style="font-size:0.75rem; color:#d29922; margin-top:6px;">' + stars_str + '</div>'
-            html += '</div>'
-            
+                    html += (f'&nbsp;·&nbsp;<span style="color:{ev_color}; '
+                             f'font-weight:600;">{ev_str}</span>')
+                html += "</div>"
+
+            html += (f'<div style="font-size:.7rem; color:{C_MUT}; letter-spacing:.2em; '
+                     f'margin-top:6px;">{conf_dots}</div>')
+            html += "</div>"
             st.markdown(html, unsafe_allow_html=True)
 
+
 # ============================================================
-# ANALISI COMPLETA PARTITA
+# COMPONENTI DISPLAY
 # ============================================================
 
-def show_analysis(fix, lid, lname):
-    api = API_FOOTBALL_KEY; season = get_current_season()
-    hn = fix["home_name"]; an = fix["away_name"]; hid = fix["home_id"]; aid = fix["away_id"]
-    ref = fix.get("referee",""); hd = dn(hn); ad = dn(an)
-    match_date = fix.get("date_raw", st.session_state.get("sel_date", datetime.now().strftime("%Y-%m-%d")))
-    
-    with st.spinner("📊 Statistiche..."): hs, aws, li = get_match_stats(api, hid, aid, lid, season)
-    with st.spinner("🔍 H2H & Tiri..."):
-        h2h = get_head_to_head(api, hid, aid, last_n=10)
-        hshots = get_team_shots_avg(api, hid, lid, season, last_n=5)
-        ashots = get_team_shots_avg(api, aid, lid, season, last_n=5)
-    with st.spinner("🧮 Calcolo..."):
-        pr = calculate_match_probabilities(hs, aws, lid, h2h_data=h2h, home_shots=hshots, away_shots=ashots,
-            referee_name=ref if ref else None, league_name=lname)
-    
-    # Recupera quote reali
+def show_exact_scores(scores, home, away):
+    cols = st.columns(5)
+    for i, (hg, ag, prob) in enumerate(scores[:10]):
+        with cols[i % 5]:
+            c = C_HOME if hg > ag else C_AWAY if ag > hg else "#484f58"
+            st.markdown(
+                f'<div class="be-chip" style="background:{c};">'
+                f'<div class="score">{hg}-{ag}</div>'
+                f'<div class="pct">{prob:.1f}%</div></div>',
+                unsafe_allow_html=True)
+    st.caption(f"🟦 vittoria {home} · 🟧 vittoria {away} · grigio pareggio")
+
+
+def show_team_stats(stats, name, is_home):
+    pos = "Casa" if is_home else "Trasferta"
+    att = stats.get("attack_home" if is_home else "attack_away", 1.0)
+    df_ = stats.get("defense_home" if is_home else "defense_away", 1.0)
+    form = stats.get("form_factor", 1.0)
+    rank = stats.get("rank", "N/A")
+    fs = stats.get("form_string", "")
+    # verde/rosso qui sono corretti: è un giudizio di performance
+    ac = C_GOOD if att > 1.1 else C_BAD if att < 0.9 else C_WARN
+    dc = C_GOOD if df_ < 0.9 else C_BAD if df_ > 1.1 else C_WARN
+    border = C_HOME if is_home else C_AWAY
+    st.markdown(f'''<div class="be-card" style="text-align:left; border-left:3px solid {border};">
+        <h4 style="margin:0 0 10px 0; font-size:1rem;">{name}</h4>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <div><small style="font-size:.7rem; color:{C_MUT};">Attacco ({pos})</small>
+                 <div style="font-size:1.1rem; color:{ac}; font-weight:700;">{att:.2f}</div></div>
+            <div><small style="font-size:.7rem; color:{C_MUT};">Difesa ({pos})</small>
+                 <div style="font-size:1.1rem; color:{dc}; font-weight:700;">{df_:.2f}</div></div>
+            <div><small style="font-size:.7rem; color:{C_MUT};">Forma</small>
+                 <div style="font-size:1rem;">{form:.2f} <small style="color:{C_MUT};">({fs[-5:] if fs else "—"})</small></div></div>
+            <div><small style="font-size:.7rem; color:{C_MUT};">Classifica</small>
+                 <div style="font-size:1.1rem;">{rank}°</div></div>
+        </div></div>''', unsafe_allow_html=True)
+
+
+def build_tracker_rows(top_preds, match_date, lname, hd, ad, anchored):
+    """Costruisce le righe da salvare nel tracker (solo su richiesta esplicita)."""
+    clean_league = lname.split(" ", 1)[-1] if lname and " " in lname else lname
+    rows = []
+    for pred in top_preds:
+        key = f"{match_date}_{hd}_{ad}_{pred.get('name', '')}"
+        rows.append({
+            "_key": key,
+            "Data": match_date,
+            "Lega": clean_league,
+            "Casa": hd,
+            "Trasferta": ad,
+            "Mercato": pred.get("mt", ""),
+            "Selezione": pred.get("name", ""),
+            "Probabilità": round(pred.get("prob", 0), 1),
+            "Quota": round(pred["odds"], 2) if pred.get("odds") else "",
+            "EV%": round(pred["ev_pct"], 1) if pred.get("ev_pct") is not None else "",
+            "Stelle": pred.get("stars", 0),
+            "Anchored": "Sì" if anchored else "No",
+            "Risultato": "",
+        })
+    return rows
+
+
+# ============================================================
+# ANALISI PARTITA (con cache in session_state)
+# ============================================================
+
+def run_analysis(fix, lid, lname):
+    """Recupera dati, calcola probabilità e ancoraggio. Eseguito UNA volta per fixture."""
+    api = API_FOOTBALL_KEY
+    season = get_current_season()
+    hid, aid = fix["home_id"], fix["away_id"]
+    ref = fix.get("referee", "")
+
+    hs, aws, li = get_match_stats(api, hid, aid, lid, season)
+    h2h = get_head_to_head(api, hid, aid, last_n=10)
+    hshots = get_team_shots_avg(api, hid, lid, season, last_n=5)
+    ashots = get_team_shots_avg(api, aid, lid, season, last_n=5)
+
+    pr = calculate_match_probabilities(
+        hs, aws, lid, h2h_data=h2h, home_shots=hshots, away_shots=ashots,
+        referee_name=ref if ref else None, league_name=lname)
+
     odds = {}
     if ODDS_API_AVAILABLE:
-        try: odds = fetch_match_odds(hn, an, lid)
-        except: pass
-    
-    # === MARKET ANCHORING: mescola modello + mercato ===
+        try:
+            odds = fetch_match_odds(fix["home_name"], fix["away_name"], lid)
+        except Exception:
+            odds = {}
+
     anchored = False
     if odds:
         pr = apply_market_anchoring(pr, odds)
         anchored = True
-    
+
     q = assess_prediction_quality(hs, aws)
-    
-    # Affidabilità + indicatore anchoring
-    qcol = "#238636" if q['score']>=70 else "#d29922" if q['score']>=50 else "#da3633"
-    anch_badge = '<span style="background:#1f6feb; color:#fff; padding:2px 8px; border-radius:10px; font-size:0.7rem; margin-left:8px;">📡 Market Anchored</span>' if anchored else '<span style="background:#484f58; color:#8b949e; padding:2px 8px; border-radius:10px; font-size:0.7rem; margin-left:8px;">Solo Modello</span>'
-    st.markdown(f'<div style="background:#161b22; border-left:3px solid {qcol}; padding:10px 14px; border-radius:8px; margin-bottom:12px;"><span style="color:#e6edf3; font-weight:600;">Affidabilità: {q["level"]}</span> <span style="color:#8b949e;">({q["score"]}%)</span>{anch_badge}</div>', unsafe_allow_html=True)
-    
-    # xG
-    c1, c2, c3 = st.columns(3)
-    with c1: st.metric("⚽ xG Casa", f"{pr['mu_home']:.2f}")
-    with c2: st.metric("⚽ xG Trasf.", f"{pr['mu_away']:.2f}")
-    with c3: st.metric("📈 Gol Attesi", f"{pr['total_expected_goals']:.2f}")
-    st.markdown("---")
-    
-    # Pronostici consigliati
+
+    return {"pr": pr, "odds": odds, "anchored": anchored, "q": q,
+            "h2h": h2h, "hshots": hshots, "ashots": ashots,
+            "hs": hs, "aws": aws}
+
+
+def show_analysis(fix, lid, lname):
+    hd, ad = dn(fix["home_name"]), dn(fix["away_name"])
+    fid = fix["fixture_id"]
+    match_date = fix.get("date_raw", st.session_state.get("sel_date", ""))
+
+    # Cache dell'analisi: rianalizzare la stessa partita è istantaneo
+    cache_key = f"an_{fid}"
+    if cache_key not in st.session_state:
+        with st.spinner("Analisi in corso…"):
+            st.session_state[cache_key] = run_analysis(fix, lid, lname)
+    data = st.session_state[cache_key]
+
+    pr, odds, anchored, q = data["pr"], data["odds"], data["anchored"], data["q"]
+    h2h, hshots, ashots = data["h2h"], data["hshots"], data["ashots"]
+    hs, aws = data["hs"], data["aws"]
+
+    # --- Barra affidabilità (soglie allineate ai livelli di assess: 85/65) ---
+    qcol = C_GOOD if q["score"] >= 85 else C_WARN if q["score"] >= 65 else C_BAD
+    anch = (f'<span class="be-badge" style="background:#1f6feb; margin-left:8px;">Market anchored</span>'
+            if anchored else
+            f'<span class="be-badge" style="background:#484f58; margin-left:8px;">Solo modello</span>')
+    st.markdown(
+        f'<div class="be-note" style="border-left-color:{qcol};">'
+        f'<span style="color:{C_TXT}; font-weight:600;">Affidabilità: {q["level"]}</span> '
+        f'<span style="color:{C_MUT};">({q["score"]}%)</span>{anch}</div>',
+        unsafe_allow_html=True)
+
     top_preds = calc_top_preds(pr, hd, ad, odds_data=odds)
-    show_top_preds(top_preds, has_odds=bool(odds))
-    
-    # === SALVA IN SESSION STATE ===
-    if top_preds:
-        clean_league = lname.split(" ", 1)[-1] if lname and " " in lname else lname
-        for pred in top_preds:
-            # Evita duplicati
-            key = f"{match_date}_{hd}_{ad}_{pred.get('name','')}"
-            already = any(r.get('_key') == key for r in st.session_state["tracked_preds"])
-            if not already:
-                st.session_state["tracked_preds"].append({
-                    "_key": key,
-                    "Data": match_date,
-                    "Lega": clean_league,
-                    "Casa": hd,
-                    "Trasferta": ad,
-                    "Mercato": pred.get('mt', ''),
-                    "Selezione": pred.get('name', ''),
-                    "Probabilità": round(pred.get('prob', 0), 1),
-                    "Quota": round(pred['odds'], 2) if pred.get('odds') else "",
-                    "EV%": round(pred['ev_pct'], 1) if pred.get('ev_pct') is not None else "",
-                    "Stelle": pred.get('stars', 0),
-                    "Anchored": "Sì" if anchored else "No",
-                    "Risultato": "",
-                })
-    
-    st.markdown("---")
-    
-    # 1X2
-    st.markdown("#### 📊 1X2")
-    st.plotly_chart(chart_1x2(pr, hd, ad), use_container_width=True, config={'displayModeBar': False})
-    st.markdown("---")
-    
-    # BTTS + O/U 2.5
-    st.markdown("#### ⚽ BTTS & Over/Under 2.5")
-    b1, b2 = st.columns(2)
-    by = pr.get('p_btts_yes',0)*100; bn = 100-by; o25 = pr.get('over_2.5',0)*100; u25 = pr.get('under_2.5',0)*100
-    with b1:
-        st.markdown(f'<div style="background:#161b22; border:1px solid #21262d; padding:16px; border-radius:10px; text-align:center;"><div style="color:#8b949e; font-size:0.85rem; margin-bottom:8px;">BTTS</div><div style="display:flex; justify-content:center; gap:24px;"><div><div style="font-size:1.6rem; font-weight:700; color:#238636;">{by:.1f}%</div><div style="color:#8b949e; font-size:0.8rem;">GG</div></div><div><div style="font-size:1.6rem; font-weight:700; color:#da3633;">{bn:.1f}%</div><div style="color:#8b949e; font-size:0.8rem;">NG</div></div></div></div>', unsafe_allow_html=True)
-    with b2:
-        st.markdown(f'<div style="background:#161b22; border:1px solid #21262d; padding:16px; border-radius:10px; text-align:center;"><div style="color:#8b949e; font-size:0.85rem; margin-bottom:8px;">Over/Under 2.5</div><div style="display:flex; justify-content:center; gap:24px;"><div><div style="font-size:1.6rem; font-weight:700; color:#238636;">{o25:.1f}%</div><div style="color:#8b949e; font-size:0.8rem;">Over</div></div><div><div style="font-size:1.6rem; font-weight:700; color:#da3633;">{u25:.1f}%</div><div style="color:#8b949e; font-size:0.8rem;">Under</div></div></div></div>', unsafe_allow_html=True)
-    st.markdown("---")
-    
-    # O/U tutte linee
-    st.markdown("#### 📈 Over/Under — Tutte le Linee")
-    st.plotly_chart(chart_ou(pr), use_container_width=True, config={'displayModeBar': False})
-    tbl = '<table><tr><th>Linea</th><th>OVER</th><th>UNDER</th><th>Quota O</th><th>Quota U</th></tr>'
-    for l in [1.5,2.5,3.5,4.5]:
-        op = pr[f'over_{l}']*100; up = pr[f'under_{l}']*100
-        qo = f"{100/op:.2f}" if op > 0 else "—"
-        qu = f"{100/up:.2f}" if up > 0 else "—"
-        tbl += f'<tr><td>{l}</td><td>{op:.1f}%</td><td>{up:.1f}%</td><td>{qo}</td><td>{qu}</td></tr>'
-    st.markdown(tbl+'</table>', unsafe_allow_html=True)
-    st.markdown("---")
-    
-    # Heatmap
-    st.markdown("#### 🎯 Risultati Esatti")
-    st.plotly_chart(chart_heatmap(pr['matrix'], hd, ad), use_container_width=True, config={'displayModeBar': False})
-    show_exact_scores(pr['exact_scores'])
-    st.markdown("---")
-    
-    # Cartellini
-    st.markdown("#### 🟨 Cartellini")
-    if pr.get("referee_found"):
-        sv = pr.get("referee_severity",1.0); rn = pr.get("referee_name","")
-        ra = pr.get("referee_avg_cards",0); rm = pr.get("referee_matches",0)
-        rc = "#da3633" if sv>1.1 else "#238636" if sv<0.9 else "#d29922"
-        rl = "SEVERO" if sv>1.1 else "PERMISSIVO" if sv<0.9 else "MEDIA"
-        st.markdown(f'<div style="background:#161b22; border-left:3px solid {rc}; padding:12px 14px; border-radius:8px; margin-bottom:12px;"><span style="color:#e6edf3; font-weight:600;">👨‍⚖️ {rn}</span> <span style="background:{rc}; color:#fff; padding:2px 8px; border-radius:10px; font-size:0.7rem; font-weight:600; margin-left:8px;">{rl}</span><br><span style="color:#8b949e; font-size:0.85rem;">{ra:.1f} cart/partita · {sv:.2f}x · {rm} partite</span></div>', unsafe_allow_html=True)
-    
-    cc1, cc2, cc3, cc4 = st.columns(4)
-    with cc1: st.metric("🏠 Casa", f"{pr.get('home_cards_avg',0):.2f}")
-    with cc2: st.metric("✈️ Trasf.", f"{pr.get('away_cards_avg',0):.2f}")
-    bc = pr.get('expected_cards_base', pr.get('expected_cards',0))
-    with cc3: st.metric("📊 Base", f"{bc:.2f}")
-    with cc4: st.metric("📊 Attesi", f"{pr.get('expected_cards',0):.2f}", delta=f"{pr.get('expected_cards',0)-bc:+.2f}" if pr.get("referee_found") else None)
-    st.plotly_chart(chart_cards(pr), use_container_width=True, config={'displayModeBar': False})
-    
-    ctbl = '<table><tr><th>Linea</th><th>OVER</th><th>UNDER</th><th>Quota O</th><th>Quota U</th></tr>'
-    for ln in [2.5,3.5,4.5,5.5,6.5]:
-        cop = pr.get(f"cards_over_{ln}",0)*100; cup = pr.get(f"cards_under_{ln}",0)*100
-        qo = f"{100/cop:.2f}" if cop > 0 else "—"
-        qu = f"{100/cup:.2f}" if cup > 0 else "—"
-        ctbl += f'<tr><td>{ln}</td><td>{cop:.1f}%</td><td>{cup:.1f}%</td><td>{qo}</td><td>{qu}</td></tr>'
-    st.markdown(ctbl+'</table>', unsafe_allow_html=True)
-    st.markdown("---")
-    
-    # H2H
-    st.markdown("#### ⚔️ Scontri Diretti")
-    if h2h.get("matches",0) > 0:
-        h1_,h2_,h3_,h4_ = st.columns(4)
-        with h1_: st.metric("Partite", h2h["matches"])
-        with h2_: st.metric(f"{hd}", h2h["team1_wins"])
-        with h3_: st.metric("Pareggi", h2h["draws"])
-        with h4_: st.metric(f"{ad}", h2h["team2_wins"])
-        st.markdown(f'<span style="color:#8b949e;">Media gol: {h2h["avg_goals"]}</span>', unsafe_allow_html=True)
+
+    tab_pred, tab_mkt, tab_exact, tab_cards, tab_stats = st.tabs(
+        ["Pronostici", "Mercati", "Risultati esatti", "Cartellini", "Statistiche"])
+
+    # ------------------------------------------------ TAB PRONOSTICI
+    with tab_pred:
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("Gol attesi casa", f"{pr['mu_home']:.2f}")
+        with c2: st.metric("Gol attesi trasferta", f"{pr['mu_away']:.2f}")
+        with c3: st.metric("Totale attesi", f"{pr['total_expected_goals']:.2f}")
+        st.caption("Stime del modello (Poisson bivariata + Dixon-Coles), non xG da dati di tiro.")
+
+        show_top_preds(top_preds)
+
+        # Salvataggio ESPLICITO: guardare un'analisi non sporca più il tracker
+        if top_preds:
+            already = all(
+                any(r.get("_key") == f"{match_date}_{hd}_{ad}_{p.get('name','')}"
+                    for r in st.session_state["tracked_preds"])
+                for p in top_preds)
+            if already:
+                st.caption("✓ Pronostici già salvati nel tracker.")
+            elif st.button("Salva nel tracker", key=f"save_{fid}",
+                           use_container_width=True):
+                rows = build_tracker_rows(top_preds, match_date, lname, hd, ad, anchored)
+                new = [r for r in rows
+                       if not any(t.get("_key") == r["_key"]
+                                  for t in st.session_state["tracked_preds"])]
+                st.session_state["tracked_preds"].extend(new)
+                st.success(f"{len(new)} pronostici salvati. Export dalla sidebar.")
+
+    # ------------------------------------------------ TAB MERCATI
+    with tab_mkt:
+        st.markdown("##### 1X2")
+        st.plotly_chart(chart_1x2(pr, hd, ad), use_container_width=True, config=PLOTLY_CFG)
+
+        st.markdown("##### BTTS e Over/Under 2.5")
+        by = pr.get("p_btts_yes", 0) * 100
+        o25 = pr.get("over_2.5", 0) * 100
+        b1, b2 = st.columns(2)
+        with b1:
+            st.markdown(
+                f'<div class="be-card"><div style="color:{C_MUT}; font-size:.85rem; '
+                f'margin-bottom:8px;">Both Teams To Score</div>'
+                f'<div style="display:flex; justify-content:center; gap:28px;">'
+                f'<div><div style="font-size:1.5rem; font-weight:700; color:{C_TXT};">{by:.1f}%</div>'
+                f'<div style="color:{C_MUT}; font-size:.8rem;">GG</div></div>'
+                f'<div><div style="font-size:1.5rem; font-weight:700; color:{C_MUT};">{100-by:.1f}%</div>'
+                f'<div style="color:{C_MUT}; font-size:.8rem;">NG</div></div>'
+                f'</div></div>', unsafe_allow_html=True)
+        with b2:
+            st.markdown(
+                f'<div class="be-card"><div style="color:{C_MUT}; font-size:.85rem; '
+                f'margin-bottom:8px;">Over/Under 2.5</div>'
+                f'<div style="display:flex; justify-content:center; gap:28px;">'
+                f'<div><div style="font-size:1.5rem; font-weight:700; color:{C_TXT};">{o25:.1f}%</div>'
+                f'<div style="color:{C_MUT}; font-size:.8rem;">Over</div></div>'
+                f'<div><div style="font-size:1.5rem; font-weight:700; color:{C_MUT};">{100-o25:.1f}%</div>'
+                f'<div style="color:{C_MUT}; font-size:.8rem;">Under</div></div>'
+                f'</div></div>', unsafe_allow_html=True)
+
+        st.markdown("##### Over/Under — tutte le linee")
+        st.plotly_chart(chart_over_lines(pr, [1.5, 2.5, 3.5, 4.5], "over_{}", C_HOME),
+                        use_container_width=True, config=PLOTLY_CFG)
+        ou_dataframe(pr, [1.5, 2.5, 3.5, 4.5], "over_{}", "under_{}")
+
+    # ------------------------------------------------ TAB RISULTATI ESATTI
+    with tab_exact:
+        st.plotly_chart(chart_heatmap(pr["matrix"], hd, ad),
+                        use_container_width=True, config=PLOTLY_CFG)
+        show_exact_scores(pr["exact_scores"], hd, ad)
+
+    # ------------------------------------------------ TAB CARTELLINI
+    with tab_cards:
+        if pr.get("referee_found"):
+            sv = pr.get("referee_severity", 1.0)
+            rn = pr.get("referee_name", "")
+            ra = pr.get("referee_avg_cards", 0)
+            rm = pr.get("referee_matches", 0)
+            rc = C_BAD if sv > 1.1 else C_GOOD if sv < 0.9 else C_WARN
+            rl = "SEVERO" if sv > 1.1 else "PERMISSIVO" if sv < 0.9 else "NELLA MEDIA"
+            st.markdown(
+                f'<div class="be-note" style="border-left-color:{rc};">'
+                f'<span style="color:{C_TXT}; font-weight:600;">Arbitro: {rn}</span>'
+                f'<span class="be-badge" style="background:{rc}; margin-left:8px;">{rl}</span><br>'
+                f'<span style="color:{C_MUT}; font-size:.85rem;">'
+                f'{ra:.1f} cartellini/partita · fattore {sv:.2f}x · {rm} partite analizzate</span></div>',
+                unsafe_allow_html=True)
+
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        bc = pr.get("expected_cards_base", pr.get("expected_cards", 0))
+        with cc1: st.metric("Media casa", f"{pr.get('home_cards_avg', 0):.2f}")
+        with cc2: st.metric("Media trasferta", f"{pr.get('away_cards_avg', 0):.2f}")
+        with cc3: st.metric("Base partita", f"{bc:.2f}")
+        with cc4: st.metric("Attesi (con arbitro)", f"{pr.get('expected_cards', 0):.2f}",
+                            delta=f"{pr.get('expected_cards', 0) - bc:+.2f}"
+                            if pr.get("referee_found") else None)
+
+        st.plotly_chart(chart_over_lines(pr, [2.5, 3.5, 4.5, 5.5, 6.5],
+                                         "cards_over_{}", C_WARN),
+                        use_container_width=True, config=PLOTLY_CFG)
+        ou_dataframe(pr, [2.5, 3.5, 4.5, 5.5, 6.5], "cards_over_{}", "cards_under_{}")
+
+    # ------------------------------------------------ TAB STATISTICHE
+    with tab_stats:
+        st.markdown("##### Scontri diretti")
+        if h2h.get("matches", 0) > 0:
+            h1_, h2_, h3_, h4_ = st.columns(4)
+            with h1_: st.metric("Partite", h2h["matches"])
+            with h2_: st.metric(hd, h2h["team1_wins"])
+            with h3_: st.metric("Pareggi", h2h["draws"])
+            with h4_: st.metric(ad, h2h["team2_wins"])
+            st.caption(f"Media gol negli scontri diretti: {h2h['avg_goals']}")
+        else:
+            st.caption("Nessuno scontro diretto recente.")
+
+        st.markdown("##### Media tiri (ultime 5)")
+        s1, s2 = st.columns(2)
+        for col, name, shots, color in [(s1, hd, hshots, C_HOME), (s2, ad, ashots, C_AWAY)]:
+            with col:
+                st.markdown(
+                    f'<div class="be-card" style="border-left:3px solid {color};">'
+                    f'<div style="color:{C_TXT}; font-weight:600; margin-bottom:6px;">{name}</div>'
+                    f'<div style="font-size:1.7rem; font-weight:800; color:{C_TXT};">'
+                    f'{shots.get("shots_avg", "—")}</div>'
+                    f'<div style="font-size:.8rem; color:{C_MUT};">tiri/partita</div>'
+                    f'<div style="font-size:1.2rem; font-weight:700; color:{color}; margin-top:4px;">'
+                    f'{shots.get("shots_on_target_avg", "—")}</div>'
+                    f'<div style="font-size:.8rem; color:{C_MUT};">in porta</div></div>',
+                    unsafe_allow_html=True)
+
+        st.markdown("##### Forze squadra")
+        t1, t2 = st.columns(2)
+        with t1: show_team_stats(hs, hd, True)
+        with t2: show_team_stats(aws, ad, False)
+
+
+# ============================================================
+# CARD PARTITA — fragment: interagire qui NON ricarica la pagina
+# ============================================================
+
+@fragment
+def match_card(fx, lid, lname):
+    hd, ad = dn(fx["home_name"]), dn(fx["away_name"])
+    s, t = fx["status"], fx["time"]
+    if s == "NS":
+        badge = f"🕐 {t}"
+    elif s in ("1H", "2H", "HT", "ET", "P", "LIVE"):
+        badge = f"🔴 {fx.get('score_home', 0)}–{fx.get('score_away', 0)}"
+    elif s == "FT":
+        badge = f"FT {fx.get('score_home', 0)}–{fx.get('score_away', 0)}"
     else:
-        st.markdown('<span style="color:#8b949e;">Nessuno scontro diretto recente</span>', unsafe_allow_html=True)
-    st.markdown("---")
-    
-    # Tiri
-    st.markdown("#### 🎯 Media Tiri (Ultime 5)")
-    s1, s2 = st.columns(2)
-    with s1:
-        st.markdown(f'<div style="background:#161b22; border:1px solid #21262d; border-left:3px solid #1f6feb; padding:14px; border-radius:10px; text-align:center;"><div style="color:#e6edf3; font-weight:600; margin-bottom:6px;">{hd}</div><div style="font-size:1.8rem; font-weight:800; color:#e6edf3;">{hshots.get("shots_avg","—")}</div><div style="font-size:0.8rem; color:#8b949e;">tiri/partita</div><div style="font-size:1.3rem; font-weight:700; color:#238636; margin-top:4px;">{hshots.get("shots_on_target_avg","—")}</div><div style="font-size:0.8rem; color:#8b949e;">in porta</div></div>', unsafe_allow_html=True)
-    with s2:
-        st.markdown(f'<div style="background:#161b22; border:1px solid #21262d; border-left:3px solid #da3633; padding:14px; border-radius:10px; text-align:center;"><div style="color:#e6edf3; font-weight:600; margin-bottom:6px;">{ad}</div><div style="font-size:1.8rem; font-weight:800; color:#e6edf3;">{ashots.get("shots_avg","—")}</div><div style="font-size:0.8rem; color:#8b949e;">tiri/partita</div><div style="font-size:1.3rem; font-weight:700; color:#da3633; margin-top:4px;">{ashots.get("shots_on_target_avg","—")}</div><div style="font-size:0.8rem; color:#8b949e;">in porta</div></div>', unsafe_allow_html=True)
-    st.markdown("---")
-    
-    # Stats
-    st.markdown("#### 📋 Statistiche")
-    t1, t2 = st.columns(2)
-    with t1: show_team_stats(hs, hd, True)
-    with t2: show_team_stats(aws, ad, False)
+        badge = f"🕐 {t}"
+
+    with st.expander(f"{badge}   {hd}  vs  {ad}", expanded=False):
+        fk = f"a_{fx['fixture_id']}"
+        if not st.session_state.get(fk):
+            ref_txt = fx.get("referee", "") or "—"
+            st.markdown(
+                f'<div style="display:flex; justify-content:space-between; '
+                f'align-items:center; padding:4px 0;">'
+                f'<span style="color:{C_TXT}; font-weight:500;">{hd} vs {ad}</span>'
+                f'<span style="color:{C_MUT}; font-size:.85rem;">'
+                f'{t} · Arbitro: {ref_txt}</span></div>',
+                unsafe_allow_html=True)
+            if st.button("Analizza partita", key=f"b_{fx['fixture_id']}",
+                         type="primary", use_container_width=True):
+                st.session_state[fk] = True
+        if st.session_state.get(fk):
+            show_analysis(fx, lid, lname)
 
 
 # ============================================================
 # SIDEBAR
 # ============================================================
 with st.sidebar:
-    st.markdown("### ⚙️ Opzioni")
+    st.markdown("### Opzioni")
+    if st.button("Aggiorna dati", use_container_width=True):
+        st.cache_data.clear()
+        # svuota anche le analisi cachate
+        for k in [k for k in st.session_state if k.startswith("an_")]:
+            del st.session_state[k]
+        st.rerun()
+
     st.markdown("---")
-    if st.button("🔄 Refresh Dati", use_container_width=True):
-        st.cache_data.clear(); st.rerun()
-    st.markdown("---")
-    adv_date = st.date_input("📅 Vai a data specifica", value=date.today(),
-        min_value=date.today()-timedelta(days=7), max_value=date.today()+timedelta(days=14))
+    adv_date = st.date_input("Vai a data specifica", value=date.today(),
+                             min_value=date.today() - timedelta(days=7),
+                             max_value=date.today() + timedelta(days=14))
     if st.button("Vai", use_container_width=True, key="goto_date"):
-        st.session_state["sel_date"] = adv_date.strftime("%Y-%m-%d"); st.rerun()
-    
+        st.session_state["sel_date"] = adv_date.strftime("%Y-%m-%d")
+        st.rerun()
+
     # === TRACKER PRONOSTICI ===
     st.markdown("---")
-    st.markdown("### 📊 Tracker")
+    st.markdown("### Tracker")
     n_tracked = len(st.session_state.get("tracked_preds", []))
-    st.markdown(f'<span style="color:#8b949e;">{n_tracked} pronostici salvati in questa sessione</span>', unsafe_allow_html=True)
-    
+    st.caption(f"{n_tracked} pronostici salvati in questa sessione")
+
     if n_tracked > 0:
-        import pandas as pd
-        # Prepara DataFrame per download
-        rows = [{k: v for k, v in r.items() if k != "_key"} for r in st.session_state["tracked_preds"]]
+        rows = [{k: v for k, v in r.items() if k != "_key"}
+                for r in st.session_state["tracked_preds"]]
         df_export = pd.DataFrame(rows)
-        
-        # Genera Excel in memoria
+
         buffer = io.BytesIO()
         try:
-            df_export.to_excel(buffer, index=False, engine='openpyxl')
+            df_export.to_excel(buffer, index=False, engine="openpyxl")
             buffer.seek(0)
             st.download_button(
-                label="📥 Scarica Excel",
-                data=buffer,
+                "Scarica Excel", data=buffer,
                 file_name=f"pronostici_{date.today().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+                use_container_width=True)
         except Exception:
-            # Fallback CSV se openpyxl non disponibile
-            csv_data = df_export.to_csv(index=False).encode('utf-8')
+            csv_data = df_export.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="📥 Scarica CSV",
-                data=csv_data,
+                "Scarica CSV", data=csv_data,
                 file_name=f"pronostici_{date.today().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        
-        if st.button("🗑️ Svuota tracker", use_container_width=True):
-            st.session_state["tracked_preds"] = []; st.rerun()
+                mime="text/csv", use_container_width=True)
+
+        if st.button("Svuota tracker", use_container_width=True):
+            st.session_state["tracked_preds"] = []
+            st.rerun()
 
 
 # ============================================================
-# INIT DATE
+# HEADER
 # ============================================================
-if "sel_date" not in st.session_state:
-    st.session_state["sel_date"] = date.today().strftime("%Y-%m-%d")
-
-sel = datetime.strptime(st.session_state["sel_date"], "%Y-%m-%d").date()
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-# Logo
-cl1, cl2, cl3 = st.columns([1,1,1])
+_logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+cl1, cl2, cl3 = st.columns([1, 1, 1])
 with cl2:
     try:
-        with open("logo.png","rb") as f: ld = base64.b64encode(f.read()).decode()
-        st.markdown(f'<div style="display:flex; justify-content:center; margin-bottom:0.5rem;"><img src="data:image/png;base64,{ld}" style="width:200px;"></div>', unsafe_allow_html=True)
-    except:
-        st.markdown('<h1 style="font-family:Outfit; text-align:center; font-size:2.5rem; letter-spacing:3px;">BETENGINE</h1>', unsafe_allow_html=True)
+        with open(_logo_path, "rb") as f:
+            ld = base64.b64encode(f.read()).decode()
+        st.markdown(
+            f'<div style="display:flex; justify-content:center; margin-bottom:.5rem;">'
+            f'<img src="data:image/png;base64,{ld}" style="width:200px;"></div>',
+            unsafe_allow_html=True)
+    except Exception:
+        st.markdown('<h1 style="text-align:center; font-size:2.3rem; '
+                    'letter-spacing:3px;">BETENGINE</h1>', unsafe_allow_html=True)
 
-st.markdown('<p style="text-align:center; color:#8b949e; margin-bottom:1rem; font-size:0.95rem;">Analisi probabilistica partite di calcio</p>', unsafe_allow_html=True)
+st.markdown('<p class="be-sub">Analisi probabilistica partite di calcio</p>',
+            unsafe_allow_html=True)
 
-# === CALENDARIO A PULSANTI ===
-gi_short = ["Lun","Mar","Mer","Gio","Ven","Sab","Dom"]
-gi_full = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì","Sabato","Domenica"]
+# ============================================================
+# CALENDARIO
+# ============================================================
+sel = datetime.strptime(st.session_state["sel_date"], "%Y-%m-%d").date()
+gi_short = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
+gi_full = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 
-# Genera 7 giorni: da ieri a +5 giorni
 cal_days = [date.today() + timedelta(days=i) for i in range(-1, 6)]
-
 cal_cols = st.columns(len(cal_days))
 for i, d in enumerate(cal_days):
     with cal_cols[i]:
-        is_today = d == date.today()
-        is_selected = d == sel
-        
-        if d == date.today(): label = "Oggi"
-        elif d == date.today() + timedelta(days=1): label = "Domani"
-        elif d == date.today() - timedelta(days=1): label = "Ieri"
-        else: label = gi_short[d.weekday()]
-        
-        day_num = d.strftime("%d/%m")
-        btn_label = f"{label}\n{day_num}"
-        
-        if st.button(btn_label, key=f"cal_{d}", use_container_width=True,
-                     type="primary" if is_selected else "secondary"):
+        if d == date.today():
+            label = "Oggi"
+        elif d == date.today() + timedelta(days=1):
+            label = "Domani"
+        elif d == date.today() - timedelta(days=1):
+            label = "Ieri"
+        else:
+            label = gi_short[d.weekday()]
+        if st.button(f"{label}\n{d.strftime('%d/%m')}", key=f"cal_{d}",
+                     use_container_width=True,
+                     type="primary" if d == sel else "secondary"):
             st.session_state["sel_date"] = d.strftime("%Y-%m-%d")
             st.rerun()
 
-st.markdown("")  # spacer
+if sel == date.today():
+    dl = "Oggi"
+elif sel == date.today() + timedelta(days=1):
+    dl = "Domani"
+elif sel == date.today() - timedelta(days=1):
+    dl = "Ieri"
+else:
+    dl = gi_full[sel.weekday()]
 
-# Label data selezionata
-if sel == date.today(): dl = "Oggi"
-elif sel == date.today()+timedelta(days=1): dl = "Domani"
-elif sel == date.today()-timedelta(days=1): dl = "Ieri"
-else: dl = gi_full[sel.weekday()]
-dd = sel.strftime("%d/%m/%Y")
-ds = sel.strftime("%Y-%m-%d")
+st.markdown(f'<p class="be-sub" style="margin-top:.5rem;">{dl}, '
+            f'{sel.strftime("%d/%m/%Y")}</p>', unsafe_allow_html=True)
 
-st.markdown(f'<div style="text-align:center; margin-bottom:1.5rem;"><span class="be-date-pill active">📅 {dl}, {dd}</span></div>', unsafe_allow_html=True)
-
-# API check
+# ============================================================
+# MAIN — LISTA PARTITE
+# ============================================================
 if not API_FOOTBALL_KEY or API_FOOTBALL_KEY == "INSERISCI_QUI_LA_TUA_API_KEY":
-    st.warning("⚠️ Configura la API key in config.py"); st.stop()
+    st.warning("Configura la API key (st.secrets o config.py)")
+    st.stop()
 
-# Fetch
-with st.spinner("⚽ Caricamento partite..."):
+ds = sel.strftime("%Y-%m-%d")
+with st.spinner("Caricamento partite…"):
     fixtures = fetch_todays_fixtures(API_FOOTBALL_KEY, ds)
 
 if not fixtures:
-    st.markdown(f'<div class="be-empty"><div class="icon">⚽</div><div class="msg">Nessuna partita per {dl.lower()}</div><div class="sub">Serie A · Premier League · LaLiga · Bundesliga · Ligue 1 · Primeira Liga · Eredivisie</div></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="be-empty"><div class="icon">⚽</div>'
+        f'<div class="msg">Nessuna partita per {dl.lower()}</div>'
+        f'<div class="sub">Serie A · Premier League · LaLiga · Bundesliga · '
+        f'Ligue 1 · Primeira Liga · Eredivisie</div></div>',
+        unsafe_allow_html=True)
 else:
     total = sum(len(f) for f in fixtures.values())
-    st.markdown(f'<div class="be-total">{total} partite in programma</div>', unsafe_allow_html=True)
-    
+    st.markdown(f'<div class="be-total">{total} partite in programma</div>',
+                unsafe_allow_html=True)
+
     for lid, fxs in fixtures.items():
         ln = LEAGUES.get(lid, {}).get("name", f"Lega {lid}")
-        st.markdown(f'<div class="be-league"><h3>{ln}</h3><span class="count">{len(fxs)}</span></div>', unsafe_allow_html=True)
-        
+        st.markdown(f'<div class="be-league"><h3>{ln}</h3>'
+                    f'<span class="count">{len(fxs)} partite</span></div>',
+                    unsafe_allow_html=True)
         for fx in fxs:
-            hd = dn(fx["home_name"]); ad = dn(fx["away_name"])
-            s = fx["status"]; t = fx["time"]
-            if s == "NS": badge = f"🕐 {t}"
-            elif s in ("1H","2H","HT","ET","P","LIVE"): badge = f"🔴 {fx.get('score_home',0)}–{fx.get('score_away',0)}"
-            elif s == "FT": badge = f"✅ {fx.get('score_home',0)}–{fx.get('score_away',0)}"
-            else: badge = f"🕐 {t}"
-            
-            with st.expander(f"{badge}   {hd}  vs  {ad}", expanded=False):
-                fk = f"a_{fx['fixture_id']}"
-                if fk not in st.session_state: st.session_state[fk] = False
-                if not st.session_state[fk]:
-                    ref_txt = fx.get('referee','') or '—'
-                    st.markdown(f'<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0;"><span style="color:#e6edf3; font-weight:500;">{hd} vs {ad}</span><span style="color:#8b949e; font-size:0.85rem;">⏰ {t} · 👨‍⚖️ {ref_txt}</span></div>', unsafe_allow_html=True)
-                    if st.button("🔮 ANALIZZA", key=f"b_{fx['fixture_id']}", use_container_width=True):
-                        st.session_state[fk] = True; st.rerun()
-                else:
-                    show_analysis(fx, lid, ln)
+            match_card(fx, lid, ln)
 
-st.markdown('<div class="be-footer">BetEngine v3.1 · Dixon-Coles · Probability Engine v3</div>', unsafe_allow_html=True)
+st.markdown('<div class="be-footer">BetEngine v4.0 · Dixon-Coles · '
+            'Probability Engine v4</div>', unsafe_allow_html=True)
