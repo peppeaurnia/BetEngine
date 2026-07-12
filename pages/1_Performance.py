@@ -22,6 +22,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import storage
+import calibration
 from results_updater import update_results
 from config import API_FOOTBALL_KEY
 
@@ -81,6 +82,43 @@ if df.empty:
             "principale e usa **Salva nel tracker**: da quel momento tutto "
             "quello che salvi viene tracciato qui.")
     st.stop()
+
+# ============================================================
+# CALIBRAZIONE EMPIRICA (punto 4 della roadmap)
+# ============================================================
+with st.expander("Calibrazione empirica"):
+    cs = calibration.status()
+    if cs["active"]:
+        st.success(f"Calibrazione ATTIVA — stimata il {cs['fitted_at']} su "
+                   f"{cs['n_settled']} pronostici chiusi. Le probabilità "
+                   f"mostrate nell'app sono corrette con la frequenza reale.")
+        if cs["per_market"]:
+            st.caption("Curve dedicate per: " + ", ".join(cs["per_market"]) +
+                       " (gli altri mercati usano la curva globale).")
+    else:
+        st.info(f"Calibrazione non attiva: servono almeno "
+                f"{cs['min_required']} pronostici chiusi "
+                f"(attuali: {cnt['settled']}). Fino ad allora l'app mostra "
+                f"le probabilità del modello senza correzioni.")
+
+    if cs.get("market_weight") is not None:
+        st.markdown(f"**Peso mercato ottimale stimato: `{cs['market_weight']}`** "
+                    f"(su {cs['market_weight_n']} pronostici con quota) — "
+                    f"attuale in `probability_engine.py`: `MARKET_WEIGHT = 0.35`. "
+                    f"Se il valore stimato è stabile per qualche settimana, "
+                    f"aggiorna la costante a mano.")
+
+    if st.button("Ricalcola calibrazione", use_container_width=True):
+        with st.spinner("Fit in corso…"):
+            res = calibration.fit_and_save()
+        if res["active"]:
+            st.success(f"Calibrazione aggiornata su {res['n_settled']} "
+                       f"pronostici chiusi.")
+        else:
+            st.warning(f"Campione ancora insufficiente "
+                       f"({res['n_settled']}/{calibration.MIN_SAMPLE_GLOBAL}): "
+                       f"nessuna correzione attivata.")
+        st.rerun()
 
 # ============================================================
 # EXPORT
@@ -155,6 +193,22 @@ g3.metric("Yield (stake flat)",
 g4.metric("Brier score", f"{brier:.4f}",
           help="0 = probabilità perfette. Sotto 0.20 è buono per il calcio; "
                "0.25 equivale a dire sempre 50%.")
+
+# --- Benchmark contro il mercato: il test che conta davvero ---
+if "prob_market" in flt.columns:
+    bm = flt[flt["prob_market"].notna()].copy()
+    if len(bm) >= 20:
+        y = bm["won"].to_numpy()
+        b_model = float(np.mean((bm["prob"].to_numpy() / 100.0 - y) ** 2))
+        b_market = float(np.mean((bm["prob_market"].to_numpy() / 100.0 - y) ** 2))
+        diff = b_model - b_market
+        verdict = ("il modello batte il mercato" if diff < -0.002 else
+                   "il mercato batte il modello" if diff > 0.002 else
+                   "modello e mercato equivalenti")
+        st.caption(f"**Benchmark vs mercato** (su {len(bm)} pronostici con "
+                   f"quote complete): Brier modello {b_model:.4f} vs Brier "
+                   f"mercato {b_market:.4f} → {verdict}. Battere stabilmente "
+                   f"il Brier del mercato è la vera prova di un edge.")
 
 if n < 50:
     st.caption(f"⚠️ Campione piccolo ({n} pronostici): win rate e yield sono "
@@ -247,6 +301,39 @@ st.dataframe(breakdown(flt, "market"), hide_index=True,
 st.markdown("#### Per lega")
 st.dataframe(breakdown(flt, "league"), hide_index=True,
              use_container_width=True, column_config=bd_cfg)
+
+# ============================================================
+# CONFRONTO A/B: ENGINE v4 vs DIXON-COLES
+# ============================================================
+if "engine" in flt.columns and flt["engine"].nunique() > 1:
+    st.markdown("#### Confronto engine (A/B)")
+    st.caption("v4 = strength da medie stagionali · dc = fit Dixon-Coles "
+               "con decadimento temporale. Il Brier più basso vince.")
+    ab_rows = []
+    for eng, grp in flt.groupby("engine"):
+        wo_e = grp[grp["odds"].notna() & (grp["odds"] > 1)]
+        yld_e = None
+        if not wo_e.empty:
+            pr_e = np.where(wo_e["status"] == "won", wo_e["odds"] - 1.0, -1.0)
+            yld_e = pr_e.sum() / len(wo_e) * 100
+        ab_rows.append({
+            "Engine": eng,
+            "N": len(grp),
+            "Win rate": grp["won"].mean() * 100,
+            "Brier": float(np.mean((grp["prob"] / 100.0 - grp["won"]) ** 2)),
+            "Yield": yld_e,
+        })
+    st.dataframe(pd.DataFrame(ab_rows), hide_index=True,
+                 use_container_width=True,
+                 column_config={
+                     "Win rate": st.column_config.NumberColumn(format="%.1f%%"),
+                     "Brier": st.column_config.NumberColumn(format="%.4f"),
+                     "Yield": st.column_config.NumberColumn(format="%+.1f%%"),
+                 })
+    min_n = min(r["N"] for r in ab_rows)
+    if min_n < 100:
+        st.caption(f"⚠️ Il gruppo più piccolo ha {min_n} pronostici: "
+                   f"sotto i ~100 per engine il confronto è indicativo.")
 
 st.markdown("---")
 

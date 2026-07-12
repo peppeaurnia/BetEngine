@@ -50,6 +50,13 @@ except ImportError:
     ODDS_API_AVAILABLE = False
 
 import storage  # tracker persistente su SQLite (betengine.db)
+import calibration  # calibrazione empirica data-driven (punto 4)
+
+try:
+    import dc_model  # motore Dixon-Coles MLE (punto 5) — richiede scipy
+    DC_AVAILABLE = True
+except ImportError:
+    DC_AVAILABLE = False
 
 # st.fragment: fallback trasparente per Streamlit < 1.37
 fragment = getattr(st, "fragment", None) or (lambda f: f)
@@ -266,13 +273,52 @@ def ou_dataframe(probs, lines, over_fmt, under_fmt):
 # PRONOSTICI CONSIGLIATI (logica del modello INVARIATA — v7)
 # ============================================================
 
+def _fair_market_prob(short, odds_data):
+    """
+    Probabilità implicita FAIR della selezione (margine bookmaker rimosso
+    normalizzando il gruppo di esiti). Serve come benchmark: in Performance
+    si confronta il Brier del modello con quello del mercato.
+    Ritorna None se il gruppo di quote non è completo.
+    """
+    if not odds_data or short not in odds_data:
+        return None
+    groups = {"1": ("1", "X", "2"), "X": ("1", "X", "2"), "2": ("1", "X", "2"),
+              "O2.5": ("O2.5", "U2.5"), "U2.5": ("O2.5", "U2.5"),
+              "GG": ("GG", "NG"), "NG": ("GG", "NG")}
+    if short.endswith("cards"):
+        partner = ("U" if short[0] == "O" else "O") + short[1:]
+        group = (short, partner)
+    else:
+        group = groups.get(short)
+    if not group:
+        return None
+    try:
+        inv = {}
+        for g in group:
+            o = float(odds_data.get(g, 0))
+            if o <= 1.0:
+                return None
+            inv[g] = 1.0 / o
+        total = sum(inv.values())
+        return round(inv[short] / total * 100, 1) if total > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def calc_top_preds(probs, home, away, odds_data=None):
     """
-    Seleziona i pronostici consigliati basandosi sulla probabilità del modello. (v7)
+    Seleziona i pronostici consigliati basandosi sulla probabilità del modello. (v8)
 
     LOGICA:
     - Consiglia un pronostico SOLO se la sua probabilità supera una soglia di mercato
-    - SCARTA la fascia 65-70% (zona zoppa rilevata su G34+G35)
+    - v8: la probabilità viene prima corretta con la CALIBRAZIONE EMPIRICA
+      (calibration.py), stimata sui pronostici realmente chiusi nel database.
+      Finché il campione è insufficiente (<150 chiusi) la correzione è nulla.
+    - v8: RIMOSSA la dead zone 65-70% della v7. Era stata stimata su 41 casi:
+      statisticamente indifendibile (nessun meccanismo plausibile per cui il
+      modello sia calibrato a 60% e a 72% ma rotto a 67%). La calibrazione
+      isotonica su un campione serio è il sostituto corretto: se quella fascia
+      è davvero sovrastimata, la curva la abbasserà in modo continuo.
     - Massimo 1 pronostico per famiglia (1X2, Goals, BTTS, Cards)
     - Mostra 0-3 pronostici, mai forzati
     - Le quote (se disponibili) sono info aggiuntiva nelle card, non un filtro
@@ -283,23 +329,21 @@ def calc_top_preds(probs, home, away, odds_data=None):
     TH_CARDS_35 = 78.0
     TH_CARDS_45 = 70.0
 
-    DEAD_ZONE_LOW = 65.0
-    DEAD_ZONE_HIGH = 70.0
-
-    def in_dead_zone(p):
-        return DEAD_ZONE_LOW <= p < DEAD_ZONE_HIGH
-
     has_odds = odds_data and len(odds_data) > 0
     candidates = []
 
     def add_candidate(short, key, name, mt, family, threshold, anchorable=True):
-        prob = probs.get(key, 0) * 100
-        prob_pure = probs.get(f"{key}_pure", probs.get(key, 0)) * 100 if anchorable else prob
-        if prob < threshold or in_dead_zone(prob):
+        prob_raw = probs.get(key, 0) * 100
+        prob_pure = probs.get(f"{key}_pure", probs.get(key, 0)) * 100 if anchorable else prob_raw
+        # Calibrazione empirica: corregge la probabilità con la frequenza
+        # storica reale (identità: nessuna correzione finché non ci sono dati)
+        prob = calibration.apply(prob_raw, market=mt)
+        if prob < threshold:
             return
         c = {"name": name, "short": short, "mt": mt, "family": family,
-             "prob": prob, "prob_pure": prob_pure, "threshold": threshold,
-             "odds": None, "ev_pct": None}
+             "prob": prob, "prob_raw": prob_raw, "prob_pure": prob_pure,
+             "threshold": threshold, "odds": None, "ev_pct": None,
+             "prob_market": _fair_market_prob(short, odds_data) if has_odds else None}
         if has_odds and short in odds_data:
             c["odds"] = float(odds_data[short])
             c["ev_pct"] = (prob_pure / 100.0 * c["odds"] - 1.0) * 100
@@ -439,9 +483,10 @@ def show_team_stats(stats, name, is_home):
         </div></div>''', unsafe_allow_html=True)
 
 
-def build_tracker_rows(top_preds, fix, lid, lname, hd, ad, anchored):
+def build_tracker_rows(top_preds, fix, lid, lname, hd, ad, anchored, engine="v4"):
     """Costruisce le righe da salvare su SQLite (solo su richiesta esplicita).
-    fixture_id e selection_code servono all'updater per chiudere gli esiti."""
+    fixture_id e selection_code servono all'updater per chiudere gli esiti;
+    prob_market ed engine servono per benchmark vs mercato e confronto A/B."""
     match_date = fix.get("date_raw", st.session_state.get("sel_date", ""))
     clean_league = lname.split(" ", 1)[-1] if lname and " " in lname else lname
     rows = []
@@ -458,10 +503,12 @@ def build_tracker_rows(top_preds, fix, lid, lname, hd, ad, anchored):
             "selection_code": pred.get("short", ""),
             "prob": round(pred.get("prob", 0), 1),
             "prob_pure": round(pred.get("prob_pure", 0), 1),
+            "prob_market": pred.get("prob_market"),
             "odds": round(pred["odds"], 2) if pred.get("odds") else None,
             "ev_pct": round(pred["ev_pct"], 1) if pred.get("ev_pct") is not None else None,
             "stars": pred.get("stars", 0),
             "anchored": anchored,
+            "engine": engine,
         })
     return rows
 
@@ -486,6 +533,20 @@ def run_analysis(fix, lid, lname):
         hs, aws, lid, h2h_data=h2h, home_shots=hshots, away_shots=ashots,
         referee_name=ref if ref else None, league_name=lname)
 
+    # --- Motore Dixon-Coles (punto 5): se i parametri della lega sono
+    # fittati e freschi, i mercati GOL vengono sovrascritti con il fit MLE.
+    # I CARTELLINI restano al modello v4 (il DC modella solo i gol).
+    # L'engine usato viene tracciato per il confronto A/B in Performance.
+    engine_used = "v4"
+    if DC_AVAILABLE:
+        try:
+            dc = dc_model.dc_match_probabilities(lid, hid, aid)
+        except Exception:
+            dc = None
+        if dc:
+            pr.update(dc)
+            engine_used = "dc"
+
     odds = {}
     if ODDS_API_AVAILABLE:
         try:
@@ -501,6 +562,7 @@ def run_analysis(fix, lid, lname):
     q = assess_prediction_quality(hs, aws)
 
     return {"pr": pr, "odds": odds, "anchored": anchored, "q": q,
+            "engine": engine_used,
             "h2h": h2h, "hshots": hshots, "ashots": ashots,
             "hs": hs, "aws": aws}
 
@@ -517,6 +579,7 @@ def show_analysis(fix, lid, lname):
     data = st.session_state[cache_key]
 
     pr, odds, anchored, q = data["pr"], data["odds"], data["anchored"], data["q"]
+    engine_used = data.get("engine", "v4")
     h2h, hshots, ashots = data["h2h"], data["hshots"], data["ashots"]
     hs, aws = data["hs"], data["aws"]
 
@@ -525,10 +588,12 @@ def show_analysis(fix, lid, lname):
     anch = (f'<span class="be-badge" style="background:#1f6feb; margin-left:8px;">Market anchored</span>'
             if anchored else
             f'<span class="be-badge" style="background:#484f58; margin-left:8px;">Solo modello</span>')
+    eng_badge = (f'<span class="be-badge" style="background:#8957e5; margin-left:8px;">'
+                 f'Engine DC</span>' if engine_used == "dc" else "")
     st.markdown(
         f'<div class="be-note" style="border-left-color:{qcol};">'
         f'<span style="color:{C_TXT}; font-weight:600;">Affidabilità: {q["level"]}</span> '
-        f'<span style="color:{C_MUT};">({q["score"]}%)</span>{anch}</div>',
+        f'<span style="color:{C_MUT};">({q["score"]}%)</span>{anch}{eng_badge}</div>',
         unsafe_allow_html=True)
 
     top_preds = calc_top_preds(pr, hd, ad, odds_data=odds)
@@ -545,6 +610,9 @@ def show_analysis(fix, lid, lname):
         st.caption("Stime del modello (Poisson bivariata + Dixon-Coles), non xG da dati di tiro.")
 
         show_top_preds(top_preds)
+        if calibration.is_active():
+            st.caption("Probabilità corrette con la calibrazione empirica "
+                       "(pagina Performance per i dettagli).")
 
         # Salvataggio ESPLICITO su SQLite: guardare un'analisi non sporca il DB
         if top_preds:
@@ -555,7 +623,7 @@ def show_analysis(fix, lid, lname):
             elif st.button("Salva nel tracker", key=f"save_{fid}",
                            use_container_width=True):
                 rows = build_tracker_rows(top_preds, fix, lid, lname,
-                                          hd, ad, anchored)
+                                          hd, ad, anchored, engine=engine_used)
                 n_saved = storage.save_predictions(rows)
                 st.success(f"{n_saved} pronostici salvati. Statistiche ed "
                            f"export nella pagina Performance.")

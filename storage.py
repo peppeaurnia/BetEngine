@@ -38,7 +38,7 @@ def _conn():
 
 
 def init_db():
-    """Crea la tabella se non esiste. Chiamata all'avvio dell'app."""
+    """Crea la tabella se non esiste e migra i DB esistenti. Chiamata all'avvio."""
     with _conn() as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
@@ -55,10 +55,12 @@ def init_db():
                 selection_code TEXT,
                 prob           REAL,
                 prob_pure      REAL,
+                prob_market    REAL,
                 odds           REAL,
                 ev_pct         REAL,
                 stars          INTEGER,
                 anchored       INTEGER DEFAULT 0,
+                engine         TEXT DEFAULT 'v4',
                 status         TEXT DEFAULT 'pending',
                 score_home     INTEGER,
                 score_away     INTEGER,
@@ -69,6 +71,14 @@ def init_db():
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_status ON predictions(status)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_fixture ON predictions(fixture_id)")
+
+        # Migrazione: aggiunge le colonne nuove a database creati prima
+        existing = {row["name"] for row in
+                    c.execute("PRAGMA table_info(predictions)").fetchall()}
+        if "prob_market" not in existing:
+            c.execute("ALTER TABLE predictions ADD COLUMN prob_market REAL")
+        if "engine" not in existing:
+            c.execute("ALTER TABLE predictions ADD COLUMN engine TEXT DEFAULT 'v4'")
 
 
 def save_predictions(rows: list) -> int:
@@ -88,16 +98,18 @@ def save_predictions(rows: list) -> int:
                 INSERT OR IGNORE INTO predictions
                 (created_at, match_date, fixture_id, league_id, league,
                  home, away, market, selection, selection_code,
-                 prob, prob_pure, odds, ev_pct, stars, anchored)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 prob, prob_pure, prob_market, odds, ev_pct, stars,
+                 anchored, engine)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 now, r.get("match_date"), r.get("fixture_id"),
                 r.get("league_id"), r.get("league"),
                 r.get("home"), r.get("away"), r.get("market"),
                 r.get("selection"), r.get("selection_code"),
-                r.get("prob"), r.get("prob_pure"), r.get("odds"),
-                r.get("ev_pct"), r.get("stars"),
+                r.get("prob"), r.get("prob_pure"), r.get("prob_market"),
+                r.get("odds"), r.get("ev_pct"), r.get("stars"),
                 1 if r.get("anchored") else 0,
+                r.get("engine", "v4"),
             ))
             inserted += cur.rowcount
     return inserted
