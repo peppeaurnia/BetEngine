@@ -23,7 +23,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
 import base64
-import io
 import os
 
 # ============================================================
@@ -50,6 +49,8 @@ try:
 except ImportError:
     ODDS_API_AVAILABLE = False
 
+import storage  # tracker persistente su SQLite (betengine.db)
+
 # st.fragment: fallback trasparente per Streamlit < 1.37
 fragment = getattr(st, "fragment", None) or (lambda f: f)
 
@@ -70,8 +71,6 @@ C_BRD  = "#30363d"
 # ============================================================
 # STATE
 # ============================================================
-if "tracked_preds" not in st.session_state:
-    st.session_state["tracked_preds"] = []
 if "sel_date" not in st.session_state:
     st.session_state["sel_date"] = date.today().strftime("%Y-%m-%d")
 
@@ -440,26 +439,29 @@ def show_team_stats(stats, name, is_home):
         </div></div>''', unsafe_allow_html=True)
 
 
-def build_tracker_rows(top_preds, match_date, lname, hd, ad, anchored):
-    """Costruisce le righe da salvare nel tracker (solo su richiesta esplicita)."""
+def build_tracker_rows(top_preds, fix, lid, lname, hd, ad, anchored):
+    """Costruisce le righe da salvare su SQLite (solo su richiesta esplicita).
+    fixture_id e selection_code servono all'updater per chiudere gli esiti."""
+    match_date = fix.get("date_raw", st.session_state.get("sel_date", ""))
     clean_league = lname.split(" ", 1)[-1] if lname and " " in lname else lname
     rows = []
     for pred in top_preds:
-        key = f"{match_date}_{hd}_{ad}_{pred.get('name', '')}"
         rows.append({
-            "_key": key,
-            "Data": match_date,
-            "Lega": clean_league,
-            "Casa": hd,
-            "Trasferta": ad,
-            "Mercato": pred.get("mt", ""),
-            "Selezione": pred.get("name", ""),
-            "Probabilità": round(pred.get("prob", 0), 1),
-            "Quota": round(pred["odds"], 2) if pred.get("odds") else "",
-            "EV%": round(pred["ev_pct"], 1) if pred.get("ev_pct") is not None else "",
-            "Stelle": pred.get("stars", 0),
-            "Anchored": "Sì" if anchored else "No",
-            "Risultato": "",
+            "match_date": match_date,
+            "fixture_id": fix["fixture_id"],
+            "league_id": lid,
+            "league": clean_league,
+            "home": hd,
+            "away": ad,
+            "market": pred.get("mt", ""),
+            "selection": pred.get("name", ""),
+            "selection_code": pred.get("short", ""),
+            "prob": round(pred.get("prob", 0), 1),
+            "prob_pure": round(pred.get("prob_pure", 0), 1),
+            "odds": round(pred["odds"], 2) if pred.get("odds") else None,
+            "ev_pct": round(pred["ev_pct"], 1) if pred.get("ev_pct") is not None else None,
+            "stars": pred.get("stars", 0),
+            "anchored": anchored,
         })
     return rows
 
@@ -506,7 +508,6 @@ def run_analysis(fix, lid, lname):
 def show_analysis(fix, lid, lname):
     hd, ad = dn(fix["home_name"]), dn(fix["away_name"])
     fid = fix["fixture_id"]
-    match_date = fix.get("date_raw", st.session_state.get("sel_date", ""))
 
     # Cache dell'analisi: rianalizzare la stessa partita è istantaneo
     cache_key = f"an_{fid}"
@@ -545,22 +546,19 @@ def show_analysis(fix, lid, lname):
 
         show_top_preds(top_preds)
 
-        # Salvataggio ESPLICITO: guardare un'analisi non sporca più il tracker
+        # Salvataggio ESPLICITO su SQLite: guardare un'analisi non sporca il DB
         if top_preds:
-            already = all(
-                any(r.get("_key") == f"{match_date}_{hd}_{ad}_{p.get('name','')}"
-                    for r in st.session_state["tracked_preds"])
-                for p in top_preds)
-            if already:
+            saved_codes = storage.fixture_saved_selections(fid)
+            pred_codes = {p.get("short", "") for p in top_preds}
+            if pred_codes and pred_codes.issubset(saved_codes):
                 st.caption("✓ Pronostici già salvati nel tracker.")
             elif st.button("Salva nel tracker", key=f"save_{fid}",
                            use_container_width=True):
-                rows = build_tracker_rows(top_preds, match_date, lname, hd, ad, anchored)
-                new = [r for r in rows
-                       if not any(t.get("_key") == r["_key"]
-                                  for t in st.session_state["tracked_preds"])]
-                st.session_state["tracked_preds"].extend(new)
-                st.success(f"{len(new)} pronostici salvati. Export dalla sidebar.")
+                rows = build_tracker_rows(top_preds, fix, lid, lname,
+                                          hd, ad, anchored)
+                n_saved = storage.save_predictions(rows)
+                st.success(f"{n_saved} pronostici salvati. Statistiche ed "
+                           f"export nella pagina Performance.")
 
     # ------------------------------------------------ TAB MERCATI
     with tab_mkt:
@@ -723,36 +721,14 @@ with st.sidebar:
         st.session_state["sel_date"] = adv_date.strftime("%Y-%m-%d")
         st.rerun()
 
-    # === TRACKER PRONOSTICI ===
+    # === TRACKER (persistente su SQLite) ===
     st.markdown("---")
     st.markdown("### Tracker")
-    n_tracked = len(st.session_state.get("tracked_preds", []))
-    st.caption(f"{n_tracked} pronostici salvati in questa sessione")
-
-    if n_tracked > 0:
-        rows = [{k: v for k, v in r.items() if k != "_key"}
-                for r in st.session_state["tracked_preds"]]
-        df_export = pd.DataFrame(rows)
-
-        buffer = io.BytesIO()
-        try:
-            df_export.to_excel(buffer, index=False, engine="openpyxl")
-            buffer.seek(0)
-            st.download_button(
-                "Scarica Excel", data=buffer,
-                file_name=f"pronostici_{date.today().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True)
-        except Exception:
-            csv_data = df_export.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Scarica CSV", data=csv_data,
-                file_name=f"pronostici_{date.today().strftime('%Y%m%d')}.csv",
-                mime="text/csv", use_container_width=True)
-
-        if st.button("Svuota tracker", use_container_width=True):
-            st.session_state["tracked_preds"] = []
-            st.rerun()
+    cnt = storage.counts()
+    st.caption(f"{cnt['total']} pronostici salvati · "
+               f"{cnt['pending']} in attesa · {cnt['settled']} chiusi")
+    st.page_link("pages/1_Performance.py",
+                 label="Performance e aggiornamento risultati", icon="📈")
 
 
 # ============================================================
