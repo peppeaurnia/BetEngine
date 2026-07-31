@@ -1,19 +1,38 @@
 """
 💾 STORAGE — Persistenza pronostici su SQLite
 ==============================================
-Sostituisce il tracker in session_state (che moriva alla chiusura del browser)
-e il vecchio tracker.py su Excel. Database locale: betengine.db nella cartella
-del progetto. Nessuna dipendenza nuova: sqlite3 è nella standard library.
+Database locale: betengine.db nella cartella del progetto.
+Nessuna dipendenza nuova: sqlite3 è nella standard library.
 
-Schema tabella `predictions`:
-- Identità partita: fixture_id, match_date, league_id, league, home, away
-- Pronostico: market (1X2/OU/BTTS/Cards), selection (label), selection_code
-  (codice macchina: 1, X, 2, O2.5, U2.5, GG, NG, O3.5cards, ...)
-- Probabilità: prob (ancorata, mostrata), prob_pure (per EV), odds, ev_pct
-- Esito: status (pending/won/lost/void), score_home, score_away, total_cards
+v5 — TRE CAMBIAMENTI STRUTTURALI
 
-Il vincolo UNIQUE(fixture_id, selection_code) impedisce i duplicati:
-salvare due volte la stessa analisi non sporca il database.
+1. `prob_raw` (NUOVA COLONNA, obbligatoria per la calibrazione)
+   Prima si salvava solo `prob`, che è la probabilità GIÀ calibrata.
+   calibration.fit_and_save() fittava la curva su quella stessa colonna e poi
+   la applicava di nuovo alle probabilità grezze: un loop di feedback che a
+   ogni refit componeva la correzione su sé stessa. Ora si salvano entrambe:
+     - prob_raw : ancorata al mercato, NON calibrata  → input del fit
+     - prob     : quello che l'app ha effettivamente mostrato → display/audit
+     - prob_pure: modello puro, senza anchoring       → EV
+
+2. `shortlisted` (NUOVA COLONNA)
+   Prima si salvavano solo i 2-3 pronostici consigliati, cioè esclusivamente
+   la coda ad alta probabilità. Risultato: la curva di calibrazione poteva
+   essere stimata solo su quella fascia, il Brier era misurato su un campione
+   censurato, e per arrivare a 150 esiti servivano mesi.
+   Ora si salva OGNI mercato di ogni partita analizzata; `shortlisted=1`
+   marca quelli effettivamente consigliati. Costo su SQLite: nullo.
+   Guadagno: 3-4x i dati, l'intero range di probabilità, e un confronto
+   modello-vs-mercato onesto.
+
+3. Colonne per il CLV (`odds_close`, `clv_pct`)
+   Il Closing Line Value è il predittore più affidabile di profittabilità a
+   lungo termine ed è misurabile in poche settimane, mentre lo yield richiede
+   centinaia di esiti. Vedi results_updater.update_closing_odds().
+
+Il vincolo UNIQUE(fixture_id, selection_code) impedisce i duplicati.
+Le migrazioni sono automatiche: un betengine.db della v4 viene aggiornato
+al primo avvio senza perdere dati.
 """
 
 import os
@@ -24,6 +43,20 @@ from datetime import datetime
 import pandas as pd
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "betengine.db")
+
+# Colonne aggiunte dopo la creazione iniziale dello schema (v4 → v5).
+# (nome, tipo SQL). La migrazione le aggiunge se mancano.
+_MIGRATIONS = [
+    ("prob_market", "REAL"),
+    ("engine", "TEXT DEFAULT 'v4'"),
+    ("prob_raw", "REAL"),
+    ("shortlisted", "INTEGER DEFAULT 1"),
+    ("sharp_book", "TEXT"),
+    ("market_source", "TEXT"),
+    ("odds_close", "REAL"),
+    ("clv_pct", "REAL"),
+    ("kelly_frac", "REAL"),
+]
 
 
 @contextmanager
@@ -54,12 +87,19 @@ def init_db():
                 selection      TEXT,
                 selection_code TEXT,
                 prob           REAL,
+                prob_raw       REAL,
                 prob_pure      REAL,
                 prob_market    REAL,
                 odds           REAL,
+                odds_close     REAL,
+                clv_pct        REAL,
                 ev_pct         REAL,
+                kelly_frac     REAL,
                 stars          INTEGER,
+                shortlisted    INTEGER DEFAULT 1,
                 anchored       INTEGER DEFAULT 0,
+                sharp_book     TEXT,
+                market_source  TEXT,
                 engine         TEXT DEFAULT 'v4',
                 status         TEXT DEFAULT 'pending',
                 score_home     INTEGER,
@@ -72,13 +112,26 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_status ON predictions(status)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_fixture ON predictions(fixture_id)")
 
-        # Migrazione: aggiunge le colonne nuove a database creati prima
+        # --- Migrazione da schemi precedenti ---
+        # DEVE avvenire PRIMA di creare indici sulle colonne nuove: su un DB
+        # v4 la colonna shortlisted non esiste ancora e CREATE INDEX fallirebbe.
         existing = {row["name"] for row in
                     c.execute("PRAGMA table_info(predictions)").fetchall()}
-        if "prob_market" not in existing:
-            c.execute("ALTER TABLE predictions ADD COLUMN prob_market REAL")
-        if "engine" not in existing:
-            c.execute("ALTER TABLE predictions ADD COLUMN engine TEXT DEFAULT 'v4'")
+        for col, coltype in _MIGRATIONS:
+            if col not in existing:
+                c.execute(f"ALTER TABLE predictions ADD COLUMN {col} {coltype}")
+
+        c.execute("CREATE INDEX IF NOT EXISTS idx_short ON predictions(shortlisted)")
+
+        # Righe della v4: prob_raw mancante. Le vecchie righe sono state
+        # salvate quando la calibrazione era ancora inattiva (identità), quindi
+        # prob == prob_raw ed è corretto ricopiarle. Le righe salvate CON
+        # calibrazione attiva non esistono: la v4 non è mai arrivata a 150.
+        c.execute("UPDATE predictions SET prob_raw = prob "
+                  "WHERE prob_raw IS NULL AND prob IS NOT NULL")
+        # Tutte le righe della v4 erano per definizione consigliate
+        c.execute("UPDATE predictions SET shortlisted = 1 "
+                  "WHERE shortlisted IS NULL")
 
 
 def save_predictions(rows: list) -> int:
@@ -98,17 +151,21 @@ def save_predictions(rows: list) -> int:
                 INSERT OR IGNORE INTO predictions
                 (created_at, match_date, fixture_id, league_id, league,
                  home, away, market, selection, selection_code,
-                 prob, prob_pure, prob_market, odds, ev_pct, stars,
-                 anchored, engine)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 prob, prob_raw, prob_pure, prob_market, odds, ev_pct,
+                 kelly_frac, stars, shortlisted, anchored, sharp_book,
+                 market_source, engine)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 now, r.get("match_date"), r.get("fixture_id"),
                 r.get("league_id"), r.get("league"),
                 r.get("home"), r.get("away"), r.get("market"),
                 r.get("selection"), r.get("selection_code"),
-                r.get("prob"), r.get("prob_pure"), r.get("prob_market"),
-                r.get("odds"), r.get("ev_pct"), r.get("stars"),
+                r.get("prob"), r.get("prob_raw"), r.get("prob_pure"),
+                r.get("prob_market"), r.get("odds"), r.get("ev_pct"),
+                r.get("kelly_frac"), r.get("stars"),
+                1 if r.get("shortlisted") else 0,
                 1 if r.get("anchored") else 0,
+                r.get("sharp_book"), r.get("market_source"),
                 r.get("engine", "v4"),
             ))
             inserted += cur.rowcount
@@ -133,6 +190,38 @@ def pending_predictions() -> list:
             ORDER BY match_date ASC
         """)
         return [dict(row) for row in cur.fetchall()]
+
+
+def predictions_awaiting_closing_odds(match_date: str) -> list:
+    """
+    Pronostici di una data specifica che hanno una quota registrata ma non
+    ancora la quota di chiusura. Usato per il calcolo del CLV.
+    """
+    with _conn() as c:
+        cur = c.execute("""
+            SELECT * FROM predictions
+            WHERE match_date = ? AND odds IS NOT NULL AND odds_close IS NULL
+            ORDER BY fixture_id
+        """, (match_date,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def set_closing_odds(pred_id: int, odds_close: float):
+    """
+    Registra la quota di chiusura e calcola il CLV.
+
+    CLV% = (quota_presa / quota_chiusura - 1) × 100
+    Positivo = hai preso una quota migliore di quella finale, cioè hai
+    anticipato il mercato. È il segnale di edge più rapido da accumulare.
+    """
+    with _conn() as c:
+        row = c.execute("SELECT odds FROM predictions WHERE id = ?",
+                        (pred_id,)).fetchone()
+        if not row or not row["odds"] or not odds_close or odds_close <= 1.0:
+            return
+        clv = (float(row["odds"]) / float(odds_close) - 1.0) * 100.0
+        c.execute("UPDATE predictions SET odds_close = ?, clv_pct = ? "
+                  "WHERE id = ?", (float(odds_close), round(clv, 2), pred_id))
 
 
 def settle_prediction(pred_id: int, status: str,
@@ -162,13 +251,17 @@ def counts() -> dict:
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-                SUM(CASE WHEN status IN ('won','lost') THEN 1 ELSE 0 END) AS settled
+                SUM(CASE WHEN status IN ('won','lost') THEN 1 ELSE 0 END) AS settled,
+                SUM(CASE WHEN shortlisted = 1 THEN 1 ELSE 0 END) AS shortlisted,
+                SUM(CASE WHEN clv_pct IS NOT NULL THEN 1 ELSE 0 END) AS with_clv
             FROM predictions
         """)
         row = cur.fetchone()
         return {"total": row["total"] or 0,
                 "pending": row["pending"] or 0,
-                "settled": row["settled"] or 0}
+                "settled": row["settled"] or 0,
+                "shortlisted": row["shortlisted"] or 0,
+                "with_clv": row["with_clv"] or 0}
 
 
 def delete_all() -> int:

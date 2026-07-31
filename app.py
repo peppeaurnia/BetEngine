@@ -37,14 +37,15 @@ st.set_page_config(
 
 from probability_engine import (calculate_match_probabilities,
                                 assess_prediction_quality,
-                                apply_market_anchoring)
+                                apply_market_anchoring,
+                                fair_probs_from_odds)
 from data_fetcher import (LEAGUES, get_match_stats, get_head_to_head,
                           get_team_shots_avg, get_current_season,
                           fetch_todays_fixtures)
 from config import API_FOOTBALL_KEY
 
 try:
-    from odds_api import fetch_match_odds
+    from odds_api import fetch_match_odds_full
     ODDS_API_AVAILABLE = True
 except ImportError:
     ODDS_API_AVAILABLE = False
@@ -273,127 +274,217 @@ def ou_dataframe(probs, lines, over_fmt, under_fmt):
 # PRONOSTICI CONSIGLIATI (logica del modello INVARIATA — v7)
 # ============================================================
 
+# ============================================================
+# PARAMETRI DI SELEZIONE (v5) — SI SELEZIONA PER VALORE, NON PER PROBABILITÀ
+# ============================================================
+# La v4 consigliava un pronostico se la sua PROBABILITÀ superava una soglia
+# (55% per 1X2, 65% per O/U e BTTS, 78% per i cartellini). La quota entrava
+# solo dopo, come decorazione. È il criterio sbagliato per un motore di
+# scommesse: un 78% a quota 1.20 è una scommessa pessima (EV -6%), un 30% a
+# quota 4.50 è ottima (EV +35%). Peggio ancora, soglie di probabilità alte
+# spingono sistematicamente sui grandi favoriti e sugli Over cartellini,
+# cioè esattamente dove il margine del bookmaker è più alto.
+#
+# v5: il gate primario è l'EV. La probabilità resta solo come filtro di
+# sanità, per non inseguire code dove il modello è inaffidabile.
+MIN_EV_PCT = 4.0        # EV minimo per consigliare (copre l'errore di stima)
+MIN_PROB_SANITY = 22.0  # sotto questa probabilità il modello è troppo rumoroso
+MAX_ODDS = 8.0          # niente longshot: varianza enorme, stime pessime
+MAX_SHORTLIST = 3
+
+# Staking: Kelly frazionario. Kelly pieno è ottimale solo se le probabilità
+# sono ESATTE; con probabilità stimate porta a rovina. Un quarto di Kelly con
+# un tetto assoluto è la scelta standard tra chi fa questo sul serio.
+KELLY_FRACTION = 0.25
+KELLY_CAP = 0.02        # mai più del 2% del bankroll su una singola giocata
+
+# Soglie di fallback, usate SOLO quando non ci sono quote e quindi l'EV non
+# è calcolabile. In quel caso l'app lo dichiara esplicitamente.
+FALLBACK_TH = {"1X2": 55.0, "OU": 65.0, "BTTS": 65.0, "Cards": 78.0}
+
+
 def _fair_market_prob(short, odds_data):
     """
-    Probabilità implicita FAIR della selezione (margine bookmaker rimosso
-    normalizzando il gruppo di esiti). Serve come benchmark: in Performance
-    si confronta il Brier del modello con quello del mercato.
-    Ritorna None se il gruppo di quote non è completo.
+    Probabilità implicita FAIR della selezione, con il margine rimosso con il
+    metodo di Shin (non per normalizzazione proporzionale: vedi
+    probability_engine._shin_probs).
+
+    `odds_data` deve essere il dizionario di UN SOLO bookmaker sharp, non le
+    quote migliori su tutti i book: quelle non formano un book coerente e le
+    loro probabilità normalizzate sono un artefatto.
+
+    Serve come benchmark: in Performance si confronta il Brier del modello
+    con quello del mercato. Ritorna None se il gruppo non è completo.
     """
     if not odds_data or short not in odds_data:
         return None
-    groups = {"1": ("1", "X", "2"), "X": ("1", "X", "2"), "2": ("1", "X", "2"),
-              "O2.5": ("O2.5", "U2.5"), "U2.5": ("O2.5", "U2.5"),
-              "GG": ("GG", "NG"), "NG": ("GG", "NG")}
     if short.endswith("cards"):
         partner = ("U" if short[0] == "O" else "O") + short[1:]
         group = (short, partner)
+    elif short in ("1", "X", "2"):
+        group = ("1", "X", "2")
+    elif short in ("GG", "NG"):
+        group = ("GG", "NG")
+    elif short[0] in ("O", "U"):
+        # Qualsiasi linea Over/Under, non solo 2.5: se il book espone O3.5 e
+        # U3.5 quella coppia è un gruppo completo e va usata.
+        partner = ("U" if short[0] == "O" else "O") + short[1:]
+        group = (short, partner)
     else:
-        group = groups.get(short)
-    if not group:
         return None
-    try:
-        inv = {}
-        for g in group:
-            o = float(odds_data.get(g, 0))
-            if o <= 1.0:
-                return None
-            inv[g] = 1.0 / o
-        total = sum(inv.values())
-        return round(inv[short] / total * 100, 1) if total > 0 else None
-    except (TypeError, ValueError):
+    fair = fair_probs_from_odds(odds_data, group)
+    if not fair:
         return None
+    return round(fair[short] * 100, 2)
 
 
-def calc_top_preds(probs, home, away, odds_data=None):
+def _kelly(p, odds):
     """
-    Seleziona i pronostici consigliati basandosi sulla probabilità del modello. (v8)
-
-    LOGICA:
-    - Consiglia un pronostico SOLO se la sua probabilità supera una soglia di mercato
-    - v8: la probabilità viene prima corretta con la CALIBRAZIONE EMPIRICA
-      (calibration.py), stimata sui pronostici realmente chiusi nel database.
-      Finché il campione è insufficiente (<150 chiusi) la correzione è nulla.
-    - v8: RIMOSSA la dead zone 65-70% della v7. Era stata stimata su 41 casi:
-      statisticamente indifendibile (nessun meccanismo plausibile per cui il
-      modello sia calibrato a 60% e a 72% ma rotto a 67%). La calibrazione
-      isotonica su un campione serio è il sostituto corretto: se quella fascia
-      è davvero sovrastimata, la curva la abbasserà in modo continuo.
-    - Massimo 1 pronostico per famiglia (1X2, Goals, BTTS, Cards)
-    - Mostra 0-3 pronostici, mai forzati
-    - Le quote (se disponibili) sono info aggiuntiva nelle card, non un filtro
+    Frazione di bankroll da puntare (Kelly frazionario con tetto).
+    f* = (p·o - 1) / (o - 1) = EV / (o - 1)
     """
-    TH_1X2 = 55.0
-    TH_OU = 65.0
-    TH_BTTS = 65.0
-    TH_CARDS_35 = 78.0
-    TH_CARDS_45 = 70.0
+    if not odds or odds <= 1.0 or p is None:
+        return None
+    edge = (p / 100.0) * odds - 1.0
+    if edge <= 0:
+        return 0.0
+    f = edge / (odds - 1.0)
+    return round(min(f * KELLY_FRACTION, KELLY_CAP), 4)
 
-    has_odds = odds_data and len(odds_data) > 0
-    candidates = []
 
-    def add_candidate(short, key, name, mt, family, threshold, anchorable=True):
-        prob_raw = probs.get(key, 0) * 100
-        prob_pure = probs.get(f"{key}_pure", probs.get(key, 0)) * 100 if anchorable else prob_raw
-        # Calibrazione empirica: corregge la probabilità con la frequenza
-        # storica reale (identità: nessuna correzione finché non ci sono dati)
-        prob = calibration.apply(prob_raw, market=mt)
-        if prob < threshold:
+def evaluate_all_markets(probs, home, away, best_odds=None, sharp_odds=None):
+    """
+    Valuta OGNI mercato della partita, senza filtri.
+
+    v5: la v4 costruiva solo i 2-3 consigliati. Salvare tutto (con un flag
+    che marca i consigliati) moltiplica per 3-4 il campione del tracker,
+    copre l'intero range di probabilità invece della sola coda alta, e rende
+    onesti sia la curva di calibrazione sia il confronto Brier col mercato.
+
+    best_odds  : quota migliore su tutti i book → EV, staking, display
+    sharp_odds : quote di un solo book sharp    → probabilità di mercato
+
+    Returns: lista di dict, uno per mercato.
+    """
+    best_odds = best_odds or {}
+    sharp_odds = sharp_odds or {}
+    out = []
+
+    def add(short, key, name, mt, family, anchorable=True):
+        if key not in probs:
             return
+        prob_raw = probs.get(key, 0) * 100
+        prob_pure = (probs.get(f"{key}_pure", probs.get(key, 0)) * 100
+                     if anchorable else prob_raw)
+
+        # Calibrazione empirica su DUE curve distinte (vedi calibration.py):
+        # quella di prob_raw corregge ciò che si mostra, quella di prob_pure
+        # corregge ciò che entra nell'EV.
+        prob = calibration.apply(prob_raw, market=mt, kind="raw")
+        p_ev = calibration.apply(prob_pure, market=mt, kind="pure")
+
         c = {"name": name, "short": short, "mt": mt, "family": family,
              "prob": prob, "prob_raw": prob_raw, "prob_pure": prob_pure,
-             "threshold": threshold, "odds": None, "ev_pct": None,
-             "prob_market": _fair_market_prob(short, odds_data) if has_odds else None}
-        if has_odds and short in odds_data:
-            c["odds"] = float(odds_data[short])
-            c["ev_pct"] = (prob_pure / 100.0 * c["odds"] - 1.0) * 100
-        candidates.append(c)
+             "p_ev": p_ev, "odds": None, "ev_pct": None, "kelly_frac": None,
+             "prob_market": _fair_market_prob(short, sharp_odds)}
+
+        if short in best_odds:
+            try:
+                o = float(best_odds[short])
+            except (TypeError, ValueError):
+                o = 0.0
+            if o > 1.0:
+                c["odds"] = o
+                c["ev_pct"] = (p_ev / 100.0 * o - 1.0) * 100
+                c["kelly_frac"] = _kelly(p_ev, o)
+        out.append(c)
 
     # 1X2
-    add_candidate("1", "p_home", home, "1X2", "1X2", TH_1X2)
-    add_candidate("X", "p_draw", "Pareggio", "1X2", "1X2", TH_1X2)
-    add_candidate("2", "p_away", away, "1X2", "1X2", TH_1X2)
-    # Over/Under 2.5
-    add_candidate("O2.5", "over_2.5", "Over 2.5", "OU", "Goals", TH_OU)
-    add_candidate("U2.5", "under_2.5", "Under 2.5", "OU", "Goals", TH_OU)
+    add("1", "p_home", home, "1X2", "1X2")
+    add("X", "p_draw", "Pareggio", "1X2", "1X2")
+    add("2", "p_away", away, "1X2", "1X2")
+    # Over/Under su tutte le linee calcolate dal modello
+    for line in (1.5, 2.5, 3.5, 4.5):
+        add(f"O{line}", f"over_{line}", f"Over {line}", "OU", "Goals",
+            anchorable=(line == 2.5))
+        add(f"U{line}", f"under_{line}", f"Under {line}", "OU", "Goals",
+            anchorable=(line == 2.5))
     # BTTS
-    add_candidate("GG", "p_btts_yes", "Gol (GG)", "BTTS", "BTTS", TH_BTTS)
-    add_candidate("NG", "p_btts_no", "NoGol (NG)", "BTTS", "BTTS", TH_BTTS)
-    # Cartellini
-    for line, th in [(3.5, TH_CARDS_35), (4.5, TH_CARDS_45)]:
-        for side, pfx in [("over", "Cart. O"), ("under", "Cart. U")]:
-            add_candidate(f"{side[0].upper()}{line}cards", f"cards_{side}_{line}",
-                          f"{pfx}{line}", "Cards", "Cards", th, anchorable=False)
+    add("GG", "p_btts_yes", "Gol (GG)", "BTTS", "BTTS")
+    add("NG", "p_btts_no", "NoGol (NG)", "BTTS", "BTTS")
+    # Cartellini (mai ancorati: nessun bookmaker li espone su The Odds API)
+    for line in (2.5, 3.5, 4.5, 5.5, 6.5):
+        add(f"O{line}cards", f"cards_over_{line}", f"Cart. O{line}",
+            "Cards", "Cards", anchorable=False)
+        add(f"U{line}cards", f"cards_under_{line}", f"Cart. U{line}",
+            "Cards", "Cards", anchorable=False)
 
-    # Uno per famiglia (il migliore per probabilità)
+    return out
+
+
+def select_shortlist(candidates):
+    """
+    Sceglie i pronostici da consigliare tra tutti i mercati valutati.
+
+    Criterio primario: EV. Filtri di sanità: probabilità minima e quota
+    massima. Massimo uno per famiglia (1X2, Goals, BTTS, Cards), massimo 3.
+
+    Se nessun mercato ha una quota, l'EV non è calcolabile: si ripiega sulle
+    vecchie soglie di probabilità, ma il chiamante lo segnala all'utente.
+    Un pronostico senza prezzo non è una scommessa, è un'opinione.
+    """
+    with_odds = [c for c in candidates if c.get("ev_pct") is not None]
+
+    if with_odds:
+        eligible = [c for c in with_odds
+                    if c["ev_pct"] >= MIN_EV_PCT
+                    and c["p_ev"] >= MIN_PROB_SANITY
+                    and c["odds"] <= MAX_ODDS]
+        key = lambda c: -c["ev_pct"]
+        mode = "ev"
+    else:
+        eligible = [c for c in candidates
+                    if c["prob"] >= FALLBACK_TH.get(c["mt"], 70.0)]
+        key = lambda c: -c["prob"]
+        mode = "prob"
+
     by_family = {}
-    for c in candidates:
-        fam = c["family"]
-        if fam not in by_family or c["prob"] > by_family[fam]["prob"]:
-            by_family[fam] = c
+    for c in sorted(eligible, key=key):
+        by_family.setdefault(c["family"], c)
 
-    top = sorted(by_family.values(), key=lambda x: -x["prob"])
+    top = sorted(by_family.values(), key=key)[:MAX_SHORTLIST]
 
+    # Le stelle ora misurano il VALORE, non la probabilità: cinque pallini su
+    # un 85% a quota 1.05 sarebbero una bugia visiva.
     for p in top:
-        prob = p["prob"]
-        if prob >= 80:   p["stars"] = 5
-        elif prob >= 72: p["stars"] = 4
-        elif prob >= 65: p["stars"] = 3
-        elif prob >= 58: p["stars"] = 2
-        else:            p["stars"] = 1
+        ev = p.get("ev_pct")
+        if ev is None:
+            p["stars"] = 2
+        elif ev >= 15:  p["stars"] = 5
+        elif ev >= 10:  p["stars"] = 4
+        elif ev >= 7:   p["stars"] = 3
+        elif ev >= 4:   p["stars"] = 2
+        else:           p["stars"] = 1
 
-    return top[:3]
+    return top, mode
 
 
-def show_top_preds(preds):
+def show_top_preds(preds, mode="ev"):
     st.markdown("##### Pronostici consigliati")
 
     if not preds:
+        msg = ("Nessun mercato con valore atteso sufficiente" if mode == "ev"
+               else "Nessun mercato supera le soglie minime del modello")
+        sub = ("Il modello non trova prezzi sbagliati su questa partita. "
+               "Non trovare valore è un risultato, non un fallimento: la "
+               "maggior parte delle partite è prezzata correttamente."
+               if mode == "ev" else
+               "Nessuna quota disponibile e nessuna probabilità sopra soglia.")
         st.markdown(
             f'<div class="be-card"><div style="color:{C_MUT}; font-size:.9rem;">'
-            f'Nessun pronostico con confidenza sufficiente</div>'
+            f'{msg}</div>'
             f'<div style="color:#484f58; font-size:.8rem; margin-top:4px;">'
-            f'Nessun mercato supera le soglie minime del modello.</div></div>',
+            f'{sub}</div></div>',
             unsafe_allow_html=True)
         return
 
@@ -404,12 +495,25 @@ def show_top_preds(preds):
         p = preds[i]
         with cols[i]:
             prob = p["prob"]
-            if prob >= 75:
-                badge_bg, badge_label = C_GOOD, "ALTA FIDUCIA"
-            elif prob >= 65:
-                badge_bg, badge_label = "#2ea043", "BUONA FIDUCIA"
+            ev = p.get("ev_pct")
+
+            # v5: il numero grande è l'EV, non la probabilità. È l'EV a dire
+            # se la scommessa vale, e metterlo in secondo piano dietro un
+            # "85%" rassicurante è esattamente come si perdono soldi con un
+            # modello corretto.
+            if ev is not None:
+                if ev >= 10:
+                    badge_bg, badge_label = C_GOOD, "VALORE ALTO"
+                elif ev >= 6:
+                    badge_bg, badge_label = "#2ea043", "VALORE BUONO"
+                else:
+                    badge_bg, badge_label = C_WARN, "VALORE MARGINALE"
+                headline = f"EV {ev:+.1f}%"
+                headline_color = C_GOOD if ev >= 6 else C_WARN
             else:
-                badge_bg, badge_label = C_WARN, "FIDUCIA MEDIA"
+                badge_bg, badge_label = C_MUT, "SENZA QUOTA"
+                headline = f"{prob:.1f}%"
+                headline_color = C_TXT
 
             conf_dots = "●" * p["stars"] + "○" * (5 - p["stars"])
 
@@ -419,26 +523,33 @@ def show_top_preds(preds):
             html += (f'<div style="font-size:.95rem; font-weight:600; color:{C_TXT}; '
                      f'margin:6px 0;">{p["name"]}</div>')
             html += (f'<div style="font-size:1.6rem; font-weight:800; '
-                     f'color:{C_TXT};">{prob:.1f}%</div>')
+                     f'color:{headline_color};">{headline}</div>')
             html += (f'<div class="be-badge" style="background:{badge_bg}; '
                      f'margin:6px 0;">{badge_label}</div>')
 
             if p.get("odds") is not None:
-                ev = p.get("ev_pct")
-                ev_color = C_GOOD if ev and ev > 5 else C_WARN if ev and ev > -3 else C_MUT
-                ev_str = f"EV {ev:+.1f}%" if ev is not None else ""
                 html += (f'<div style="font-size:.78rem; color:{C_MUT}; margin-top:6px; '
                          f'padding-top:6px; border-top:1px solid #21262d;">'
-                         f'Quota <strong style="color:{C_TXT};">{p["odds"]:.2f}</strong>')
-                if ev_str:
-                    html += (f'&nbsp;·&nbsp;<span style="color:{ev_color}; '
-                             f'font-weight:600;">{ev_str}</span>')
-                html += "</div>"
+                         f'Quota <strong style="color:{C_TXT};">{p["odds"]:.2f}</strong>'
+                         f'&nbsp;·&nbsp;Prob <strong style="color:{C_TXT};">'
+                         f'{prob:.1f}%</strong></div>')
+
+                kf = p.get("kelly_frac")
+                if kf:
+                    html += (f'<div style="font-size:.75rem; color:{C_MUT}; margin-top:4px;">'
+                             f'Puntata <strong style="color:{C_TXT};">'
+                             f'{kf * 100:.2f}%</strong> del bankroll</div>')
 
             html += (f'<div style="font-size:.7rem; color:{C_MUT}; letter-spacing:.2em; '
                      f'margin-top:6px;">{conf_dots}</div>')
             html += "</div>"
             st.markdown(html, unsafe_allow_html=True)
+
+    if mode == "ev":
+        st.caption(f"Selezione per valore atteso (EV ≥ {MIN_EV_PCT:.0f}%, "
+                   f"probabilità ≥ {MIN_PROB_SANITY:.0f}%, quota ≤ {MAX_ODDS:.0f}). "
+                   f"Puntata suggerita: {KELLY_FRACTION:.0%} di Kelly, "
+                   f"tetto {KELLY_CAP:.0%} del bankroll.")
 
 
 # ============================================================
@@ -483,14 +594,31 @@ def show_team_stats(stats, name, is_home):
         </div></div>''', unsafe_allow_html=True)
 
 
-def build_tracker_rows(top_preds, fix, lid, lname, hd, ad, anchored, engine="v4"):
-    """Costruisce le righe da salvare su SQLite (solo su richiesta esplicita).
+def build_tracker_rows(all_candidates, shortlist, fix, lid, lname, hd, ad,
+                       anchored, engine="v4", sharp_book=None,
+                       market_source=None):
+    """
+    Costruisce le righe da salvare su SQLite (solo su richiesta esplicita).
+
+    v5: si salva OGNI mercato valutato, non solo i 2-3 consigliati.
+    `shortlisted` marca quelli effettivamente proposti. Il costo su SQLite è
+    trascurabile; il guadagno è che la calibrazione e il confronto Brier col
+    mercato smettono di essere stimati su un campione censurato alla sola
+    coda ad alta probabilità, e la soglia dei 150 esiti arriva in settimane
+    invece che in mesi.
+
     fixture_id e selection_code servono all'updater per chiudere gli esiti;
-    prob_market ed engine servono per benchmark vs mercato e confronto A/B."""
+    prob_market ed engine servono per benchmark vs mercato e confronto A/B.
+    """
     match_date = fix.get("date_raw", st.session_state.get("sel_date", ""))
     clean_league = lname.split(" ", 1)[-1] if lname and " " in lname else lname
+    short_codes = {p.get("short") for p in shortlist}
+
+    def _r(v, n=1):
+        return round(v, n) if v is not None else None
+
     rows = []
-    for pred in top_preds:
+    for pred in all_candidates:
         rows.append({
             "match_date": match_date,
             "fixture_id": fix["fixture_id"],
@@ -501,13 +629,21 @@ def build_tracker_rows(top_preds, fix, lid, lname, hd, ad, anchored, engine="v4"
             "market": pred.get("mt", ""),
             "selection": pred.get("name", ""),
             "selection_code": pred.get("short", ""),
-            "prob": round(pred.get("prob", 0), 1),
-            "prob_pure": round(pred.get("prob_pure", 0), 1),
+            # prob     = mostrata (ancorata + calibrata)
+            # prob_raw = ancorata ma NON calibrata → input del fit isotonico
+            # prob_pure= modello puro, senza anchoring → EV
+            "prob": _r(pred.get("prob")),
+            "prob_raw": _r(pred.get("prob_raw")),
+            "prob_pure": _r(pred.get("prob_pure")),
             "prob_market": pred.get("prob_market"),
-            "odds": round(pred["odds"], 2) if pred.get("odds") else None,
-            "ev_pct": round(pred["ev_pct"], 1) if pred.get("ev_pct") is not None else None,
+            "odds": _r(pred.get("odds"), 2),
+            "ev_pct": _r(pred.get("ev_pct")),
+            "kelly_frac": pred.get("kelly_frac"),
             "stars": pred.get("stars", 0),
+            "shortlisted": 1 if pred.get("short") in short_codes else 0,
             "anchored": anchored,
+            "sharp_book": sharp_book,
+            "market_source": market_source,
             "engine": engine,
         })
     return rows
@@ -547,21 +683,31 @@ def run_analysis(fix, lid, lname):
             pr.update(dc)
             engine_used = "dc"
 
-    odds = {}
+    # v5: quote migliori (per EV e staking) e quote sharp (per stimare le
+    # probabilità di mercato) sono due cose diverse e vengono tenute separate.
+    odds_full = {"best": {}, "sharp": {}, "sharp_book": None, "n_books": 0}
     if ODDS_API_AVAILABLE:
         try:
-            odds = fetch_match_odds(fix["home_name"], fix["away_name"], lid)
+            odds_full = fetch_match_odds_full(fix["home_name"],
+                                              fix["away_name"], lid)
         except Exception:
-            odds = {}
+            pass
+
+    odds = odds_full.get("best", {})
+    sharp_odds = odds_full.get("sharp", {})
 
     anchored = False
-    if odds:
-        pr = apply_market_anchoring(pr, odds)
-        anchored = True
+    if odds or sharp_odds:
+        pr = apply_market_anchoring(pr, odds, sharp_odds=sharp_odds)
+        anchored = bool(pr.get("market_anchored"))
 
     q = assess_prediction_quality(hs, aws)
 
-    return {"pr": pr, "odds": odds, "anchored": anchored, "q": q,
+    return {"pr": pr, "odds": odds, "sharp_odds": sharp_odds,
+            "sharp_book": odds_full.get("sharp_book"),
+            "n_books": odds_full.get("n_books", 0),
+            "market_source": pr.get("market_source"),
+            "anchored": anchored, "q": q,
             "engine": engine_used,
             "h2h": h2h, "hshots": hshots, "ashots": ashots,
             "hs": hs, "aws": aws}
@@ -579,15 +725,26 @@ def show_analysis(fix, lid, lname):
     data = st.session_state[cache_key]
 
     pr, odds, anchored, q = data["pr"], data["odds"], data["anchored"], data["q"]
+    sharp_odds = data.get("sharp_odds", {})
     engine_used = data.get("engine", "v4")
     h2h, hshots, ashots = data["h2h"], data["hshots"], data["ashots"]
     hs, aws = data["hs"], data["aws"]
 
     # --- Barra affidabilità (soglie allineate ai livelli di assess: 85/65) ---
     qcol = C_GOOD if q["score"] >= 85 else C_WARN if q["score"] >= 65 else C_BAD
-    anch = (f'<span class="be-badge" style="background:#1f6feb; margin-left:8px;">Market anchored</span>'
-            if anchored else
-            f'<span class="be-badge" style="background:#484f58; margin-left:8px;">Solo modello</span>')
+    # v5: si dichiara DA DOVE arrivano le probabilità di mercato. Se non c'è
+    # un book sharp il dato è di qualità inferiore e va detto, non nascosto.
+    src = data.get("market_source")
+    book = data.get("sharp_book")
+    if anchored and src == "sharp":
+        anch = (f'<span class="be-badge" style="background:#1f6feb; margin-left:8px;">'
+                f'Ancorato · {book}</span>')
+    elif anchored:
+        anch = (f'<span class="be-badge" style="background:#9e6a03; margin-left:8px;">'
+                f'Ancorato · book non sharp</span>')
+    else:
+        anch = (f'<span class="be-badge" style="background:#484f58; margin-left:8px;">'
+                f'Solo modello</span>')
     eng_badge = (f'<span class="be-badge" style="background:#8957e5; margin-left:8px;">'
                  f'Engine DC</span>' if engine_used == "dc" else "")
     st.markdown(
@@ -596,7 +753,10 @@ def show_analysis(fix, lid, lname):
         f'<span style="color:{C_MUT};">({q["score"]}%)</span>{anch}{eng_badge}</div>',
         unsafe_allow_html=True)
 
-    top_preds = calc_top_preds(pr, hd, ad, odds_data=odds)
+    # v5: si valutano TUTTI i mercati, poi si seleziona per EV
+    all_cands = evaluate_all_markets(pr, hd, ad, best_odds=odds,
+                                     sharp_odds=sharp_odds)
+    top_preds, sel_mode = select_shortlist(all_cands)
 
     tab_pred, tab_mkt, tab_exact, tab_cards, tab_stats = st.tabs(
         ["Pronostici", "Mercati", "Risultati esatti", "Cartellini", "Statistiche"])
@@ -609,24 +769,37 @@ def show_analysis(fix, lid, lname):
         with c3: st.metric("Totale attesi", f"{pr['total_expected_goals']:.2f}")
         st.caption("Stime del modello (Poisson bivariata + Dixon-Coles), non xG da dati di tiro.")
 
-        show_top_preds(top_preds)
+        show_top_preds(top_preds, sel_mode)
+
+        if sel_mode == "prob":
+            st.warning("Nessuna quota disponibile per questa partita: l'EV non "
+                       "è calcolabile e la selezione ripiega sulle vecchie "
+                       "soglie di probabilità. Trattali come opinioni del "
+                       "modello, non come scommesse di valore.")
         if calibration.is_active():
             st.caption("Probabilità corrette con la calibrazione empirica "
                        "(pagina Performance per i dettagli).")
 
         # Salvataggio ESPLICITO su SQLite: guardare un'analisi non sporca il DB
-        if top_preds:
+        if all_cands:
             saved_codes = storage.fixture_saved_selections(fid)
-            pred_codes = {p.get("short", "") for p in top_preds}
-            if pred_codes and pred_codes.issubset(saved_codes):
-                st.caption("✓ Pronostici già salvati nel tracker.")
+            all_codes = {c.get("short", "") for c in all_cands}
+            if all_codes and all_codes.issubset(saved_codes):
+                st.caption("✓ Partita già salvata nel tracker "
+                           f"({len(all_codes)} mercati).")
             elif st.button("Salva nel tracker", key=f"save_{fid}",
                            use_container_width=True):
-                rows = build_tracker_rows(top_preds, fix, lid, lname,
-                                          hd, ad, anchored, engine=engine_used)
+                rows = build_tracker_rows(
+                    all_cands, top_preds, fix, lid, lname, hd, ad, anchored,
+                    engine=engine_used, sharp_book=data.get("sharp_book"),
+                    market_source=data.get("market_source"))
                 n_saved = storage.save_predictions(rows)
-                st.success(f"{n_saved} pronostici salvati. Statistiche ed "
-                           f"export nella pagina Performance.")
+                st.success(f"{n_saved} mercati salvati ({len(top_preds)} "
+                           f"consigliati). Statistiche ed export nella "
+                           f"pagina Performance.")
+            st.caption("Vengono salvati tutti i mercati, non solo i consigliati: "
+                       "serve a misurare la calibrazione su tutto il range di "
+                       "probabilità invece che sulla sola coda alta.")
 
     # ------------------------------------------------ TAB MERCATI
     with tab_mkt:

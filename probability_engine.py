@@ -12,7 +12,7 @@ Versione: 2.0 (Gennaio 2025)
 """
 
 import numpy as np
-from math import exp, factorial
+from math import exp, factorial, lgamma, log
 from typing import Dict, Tuple, Optional
 
 # ============================================================
@@ -25,7 +25,19 @@ POWER_DAMP = 0.70       # Comprime strength estremi (0.5→0.62, 2.0→1.62)
 SHRINKAGE = 0.15        # Tira strength verso 1.0 del 15%
 
 # Soft adjustment: peso di forma + momentum (rank RIMOSSO — già nelle strength)
-SOFT_ADJ_WEIGHT = 0.25  # Peso per forma/momentum
+#
+# v5: RIDOTTO da 0.25 a 0.12. Due motivi:
+# 1. form_factor e momentum sono entrambi costruiti dai punti delle ultime
+#    partite: non sono due segnali indipendenti da mediare, sono lo STESSO
+#    segnale contato due volte. La media (form+momentum)/2 dava l'illusione
+#    di un'aggregazione robusta quando è solo rumore correlato.
+# 2. Quelle stesse partite sono GIÀ dentro i totali stagionali da cui si
+#    ricavano attack_/defense_strength. Il soft adjustment le pesa una terza
+#    volta.
+# Il motore Dixon-Coles (dc_model.py) risolve tutto questo alla radice con il
+# decadimento temporale: lì form e momentum non esistono proprio. Questo
+# parametro conta solo per il fallback v4.
+SOFT_ADJ_WEIGHT = 0.12  # Peso per forma/momentum (segnale unico, non due)
 
 # Floor gol attesi
 MIN_TOTAL_MU = 1.8      # Gol attesi minimi per partita
@@ -47,79 +59,186 @@ MARKET_WEIGHT = 0.35
 # 2. Market anchoring: blend modello + quote bookmaker (in apply_market_anchoring)
 
 
-def apply_market_anchoring(probs: Dict, odds: Dict) -> Dict:
+# ============================================================
+# v5: RIMOZIONE DEL MARGINE — METODO DI SHIN
+# ============================================================
+# La normalizzazione proporzionale (p_i = (1/o_i) / Σ(1/o_j)) è distorta:
+# assume che il bookmaker spalmi il margine in modo uniforme, mentre in
+# realtà lo concentra sugli outsider (favourite-longshot bias). Il risultato
+# è che i favoriti risultano SOTTOSTIMATI e gli outsider SOVRASTIMATI.
+#
+# Shin (1993) modella il margine come protezione contro scommettitori
+# informati (quota z di "insider trading"), e ricava:
+#
+#   p_i = [ sqrt(z² + 4(1-z)·q_i²/B) - z ] / (2(1-z))
+#
+# dove q_i = 1/o_i (inverse odds grezze) e B = Σ q_j (booksum).
+# z si trova numericamente imponendo Σ p_i = 1.
+#
+# Con z → 0 il metodo degenera nella normalizzazione proporzionale, quindi
+# non si perde nulla: nel caso peggiore si ottiene lo stesso risultato.
+
+def _shin_probs(inv_odds: list, max_iter: int = 80) -> list:
+    """
+    Probabilità fair con il metodo di Shin.
+    inv_odds: lista di 1/quota (NON normalizzate).
+    Ritorna la lista di probabilità che somma a 1.
+    """
+    q = np.asarray(inv_odds, dtype=float)
+    if q.size < 2 or np.any(q <= 0):
+        return []
+    B = float(q.sum())
+    if B <= 1.0:
+        # Nessun margine (o quote incoerenti): normalizza e basta
+        return (q / B).tolist()
+
+    def _p(z):
+        if z >= 1.0 - 1e-9:
+            return q / B
+        disc = z * z + 4.0 * (1.0 - z) * (q * q) / B
+        return (np.sqrt(np.maximum(disc, 0.0)) - z) / (2.0 * (1.0 - z))
+
+    # Σp(z) è decrescente in z: a z=0 vale sqrt(B) > 1. Bisezione.
+    lo, hi = 0.0, 0.99
+    if _p(lo).sum() <= 1.0:
+        return (q / B).tolist()
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        if _p(mid).sum() > 1.0:
+            lo = mid
+        else:
+            hi = mid
+    p = _p(0.5 * (lo + hi))
+    s = float(p.sum())
+    return (p / s).tolist() if s > 0 else (q / B).tolist()
+
+
+def fair_probs_from_odds(odds: Dict, group: tuple) -> Optional[Dict[str, float]]:
+    """
+    Probabilità fair (margine rimosso con Shin) per un gruppo COMPLETO di
+    esiti mutuamente esclusivi ed esaustivi.
+
+    odds:  dict {codice_selezione: quota_decimale}
+    group: tuple dei codici che compongono il gruppo, es. ('1','X','2')
+
+    Ritorna None se manca anche una sola quota del gruppo: normalizzare un
+    gruppo incompleto produce probabilità sbagliate, meglio nessun dato.
+    """
+    if not odds:
+        return None
+    inv = []
+    for g in group:
+        try:
+            o = float(odds.get(g, 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if o <= 1.0:
+            return None
+        inv.append(1.0 / o)
+    p = _shin_probs(inv)
+    if not p:
+        return None
+    return {g: float(v) for g, v in zip(group, p)}
+
+
+def booksum(odds: Dict, group: tuple) -> Optional[float]:
+    """Somma delle inverse odds di un gruppo (1.0 = nessun margine)."""
+    try:
+        s = sum(1.0 / float(odds[g]) for g in group)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+    return s
+
+
+# Gruppi di mercato usati per rimuovere il margine
+MARKET_GROUPS = {
+    "1X2": ("1", "X", "2"),
+    "OU25": ("O2.5", "U2.5"),
+    "BTTS": ("GG", "NG"),
+}
+
+
+def apply_market_anchoring(probs: Dict, odds: Dict,
+                           sharp_odds: Dict = None) -> Dict:
     """
     Mescola le probabilità del modello con quelle implicite dei bookmaker.
-    
-    v4.1: Conserva SEMPRE le probabilità pure pre-anchoring in chiavi con 
-    suffisso "_pure". Questo permette di:
-    - Mostrare all'utente le probabilità ancorate (più calibrate visivamente)
-    - Calcolare l'EV sulle probabilità pure (segnale indipendente dal mercato)
-    
-    Senza questa separazione, l'EV calcolato sulle probabilità ancorate è
-    circolare: più il modello è vicino al mercato, meno trova value bet.
-    
-    Formula anchoring: p_final = (1 - MARKET_WEIGHT) × p_model + MARKET_WEIGHT × p_market
+
+    v5 CAMBIAMENTI IMPORTANTI:
+    - Il margine viene rimosso con il metodo di Shin, non per normalizzazione
+      proporzionale (vedi _shin_probs).
+    - Le probabilità di mercato vengono stimate dalle quote di UN SOLO
+      bookmaker sharp (`sharp_odds`), non dal massimo su tutti i bookmaker.
+      Prendere il massimo esito per esito costruisce un book sintetico che
+      nessuno ha mai quotato: il margine risulta già eroso e la FORMA della
+      distribuzione è distorta. Le best odds servono per l'EV e per piazzare,
+      NON per stimare probabilità.
+    - Se `sharp_odds` manca si ripiega su `odds` ma viene segnalato con
+      `market_source='best'`, così l'app e la pagina Performance sanno che
+      quel dato è di qualità inferiore.
+
+    Conserva SEMPRE le probabilità pure pre-anchoring con suffisso "_pure":
+    l'EV va calcolato su quelle, altrimenti è circolare (più il modello
+    converge al mercato, meno trova value).
+
+    Formula: p_final = (1 - MARKET_WEIGHT) × p_model + MARKET_WEIGHT × p_market
     """
-    # Salva SEMPRE le probabilità pure (anche se non ci sono quote)
     result = dict(probs)
-    
-    # Chiavi da preservare come _pure
-    pure_keys = ['p_home', 'p_draw', 'p_away', 
-                 'over_2.5', 'under_2.5', 
+
+    pure_keys = ['p_home', 'p_draw', 'p_away',
+                 'over_2.5', 'under_2.5',
                  'p_btts_yes', 'p_btts_no']
     for k in pure_keys:
         if k in probs:
             result[f'{k}_pure'] = probs[k]
-    
-    if not odds:
+
+    # Fonte delle probabilità di mercato: sharp book se disponibile
+    src = sharp_odds if sharp_odds else odds
+    result['market_source'] = 'sharp' if sharp_odds else ('best' if odds else None)
+
+    if not src:
         result['market_anchored'] = False
         return result
-    
+
     w = MARKET_WEIGHT
-    
+    anchored_any = False
+
     # === 1X2 ===
-    if '1' in odds and 'X' in odds and '2' in odds:
-        imp_h = 1.0 / odds['1']
-        imp_d = 1.0 / odds['X']
-        imp_a = 1.0 / odds['2']
-        total_imp = imp_h + imp_d + imp_a
-        if total_imp > 0:
-            imp_h /= total_imp
-            imp_d /= total_imp
-            imp_a /= total_imp
-            result['p_home'] = (1 - w) * probs['p_home'] + w * imp_h
-            result['p_draw'] = (1 - w) * probs['p_draw'] + w * imp_d
-            result['p_away'] = (1 - w) * probs['p_away'] + w * imp_a
-            t = result['p_home'] + result['p_draw'] + result['p_away']
-            if t > 0:
-                result['p_home'] /= t
-                result['p_draw'] /= t
-                result['p_away'] /= t
-    
+    fair = fair_probs_from_odds(src, MARKET_GROUPS["1X2"])
+    if fair:
+        result['p_home'] = (1 - w) * probs.get('p_home', 0.0) + w * fair['1']
+        result['p_draw'] = (1 - w) * probs.get('p_draw', 0.0) + w * fair['X']
+        result['p_away'] = (1 - w) * probs.get('p_away', 0.0) + w * fair['2']
+        t = result['p_home'] + result['p_draw'] + result['p_away']
+        if t > 0:
+            result['p_home'] /= t
+            result['p_draw'] /= t
+            result['p_away'] /= t
+        result['booksum_1x2'] = booksum(src, MARKET_GROUPS["1X2"])
+        anchored_any = True
+
     # === OVER/UNDER 2.5 ===
-    if 'O2.5' in odds and 'U2.5' in odds:
-        imp_o = 1.0 / odds['O2.5']
-        imp_u = 1.0 / odds['U2.5']
-        total_imp = imp_o + imp_u
-        if total_imp > 0:
-            imp_o /= total_imp
-            imp_u /= total_imp
-            result['over_2.5'] = (1 - w) * probs.get('over_2.5', 0.5) + w * imp_o
-            result['under_2.5'] = (1 - w) * probs.get('under_2.5', 0.5) + w * imp_u
-    
+    fair = fair_probs_from_odds(src, MARKET_GROUPS["OU25"])
+    if fair:
+        result['over_2.5'] = (1 - w) * probs.get('over_2.5', 0.5) + w * fair['O2.5']
+        result['under_2.5'] = (1 - w) * probs.get('under_2.5', 0.5) + w * fair['U2.5']
+        t = result['over_2.5'] + result['under_2.5']
+        if t > 0:
+            result['over_2.5'] /= t
+            result['under_2.5'] /= t
+        anchored_any = True
+
     # === BTTS ===
-    if 'GG' in odds and 'NG' in odds:
-        imp_gg = 1.0 / odds['GG']
-        imp_ng = 1.0 / odds['NG']
-        total_imp = imp_gg + imp_ng
-        if total_imp > 0:
-            imp_gg /= total_imp
-            imp_ng /= total_imp
-            result['p_btts_yes'] = (1 - w) * probs.get('p_btts_yes', 0.5) + w * imp_gg
-            result['p_btts_no'] = (1 - w) * probs.get('p_btts_no', 0.5) + w * imp_ng
-    
-    result['market_anchored'] = True
+    fair = fair_probs_from_odds(src, MARKET_GROUPS["BTTS"])
+    if fair:
+        result['p_btts_yes'] = (1 - w) * probs.get('p_btts_yes', 0.5) + w * fair['GG']
+        result['p_btts_no'] = (1 - w) * probs.get('p_btts_no', 0.5) + w * fair['NG']
+        t = result['p_btts_yes'] + result['p_btts_no']
+        if t > 0:
+            result['p_btts_yes'] /= t
+            result['p_btts_no'] /= t
+        anchored_any = True
+
+    result['market_anchored'] = anchored_any
     return result
 
 # λ₃ calibrato empiricamente per ogni lega (correlazione gol)
@@ -161,6 +280,36 @@ def poisson_pmf(k: int, lam: float) -> float:
     if k < 0:
         return 0.0
     return exp(-lam) * (lam ** k) / factorial(k)
+
+
+# v5: rapporto varianza/media dei cartellini totali per partita.
+# 1.0 = Poisson (varianza = media). I dati dei principali campionati europei
+# stanno tra 1.25 e 1.45 a seconda della lega; 1.35 è un valore centrale
+# prudente. Da ristimare dai dati quando il tracker avrà abbastanza esiti
+# con total_cards registrati (vedi 1_Performance.py).
+CARDS_VMR = 1.35
+
+
+def negbinom_pmf(k: int, mean: float, vmr: float = CARDS_VMR) -> float:
+    """
+    Massa di probabilità della binomiale negativa parametrizzata per
+    media e rapporto varianza/media (VMR).
+
+    var = mean · vmr  →  r = mean / (vmr - 1),  p = r / (r + mean)
+    Con vmr <= 1 degenera in Poisson (nessuna sovradispersione).
+    """
+    if mean <= 0:
+        return 1.0 if k == 0 else 0.0
+    if vmr <= 1.0 + 1e-9:
+        return poisson_pmf(k, mean)
+    r = mean / (vmr - 1.0)
+    try:
+        log_p = (lgamma(k + r) - lgamma(r) - lgamma(k + 1)
+                 + r * log(r / (r + mean))
+                 + k * log(mean / (r + mean)))
+        return float(exp(log_p))
+    except (ValueError, OverflowError, ZeroDivisionError):
+        return 0.0
 
 
 def clamp_lambda(lam: float, min_val: float = 0.4, max_val: float = 4.5) -> float:
@@ -792,21 +941,36 @@ def calculate_cards_probabilities(home_stats: Dict, away_stats: Dict,
     # Clamp per stabilità
     lambda_cards = max(2.0, min(lambda_cards, 8.0))
     
-    # Calcola probabilità cumulative con Poisson
+    # ============================================================
+    # v5: BINOMIALE NEGATIVA al posto di Poisson
+    # ============================================================
+    # I cartellini sono FORTEMENTE sovradispersi: la varianza osservata per
+    # partita è circa 1.3-1.4 volte la media (partite nervose, cascate di
+    # ammonizioni dopo un fallo duro, espulsioni che generano altri cartellini).
+    # Poisson impone varianza = media e quindi COMPRIME le code: sottostima
+    # sia gli Over alti sia gli Under bassi.
+    #
+    # Effetto pratico del bug precedente: sulle linee alte (O4.5, O5.5) Poisson
+    # dava probabilità troppo basse → il modello NON le proponeva mai; sulle
+    # linee basse dava Under troppo alti → li proponeva come "sicuri" a 78%+
+    # quando la frequenza reale è più bassa. Esattamente il tipo di errore che
+    # produce value bet fantasma su un mercato con margine alto.
+    #
+    # Binomiale negativa: var = λ(1 + λ/r) → r = λ / (VMR - 1)
     probs_cards = {}
     
     for line in [2.5, 3.5, 4.5, 5.5, 6.5]:
-        # P(X > line) = 1 - P(X <= floor(line))
-        p_under = 0
+        p_under = 0.0
         for k in range(int(line) + 1):
-            p_under += poisson_pmf(k, lambda_cards)
-        
-        p_over = 1 - p_under
+            p_under += negbinom_pmf(k, lambda_cards, CARDS_VMR)
+        p_under = min(max(p_under, 0.0), 1.0)
+        p_over = 1.0 - p_under
         
         probs_cards[f"cards_over_{line}"] = round(p_over, 4)
         probs_cards[f"cards_under_{line}"] = round(p_under, 4)
     
     # Aggiungi lambda e info per riferimento
+    probs_cards["cards_vmr"] = CARDS_VMR
     probs_cards["expected_cards"] = round(lambda_cards, 2)
     probs_cards["expected_cards_base"] = round(lambda_cards_base, 2)
     probs_cards["home_cards_avg"] = round(home_cards, 2)

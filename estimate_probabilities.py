@@ -39,6 +39,7 @@ from probability_engine import (
     calculate_over_under,
     calculate_btts,
     MARKET_WEIGHT,                # peso anchoring (unico, come in produzione)
+    _shin_probs,                  # rimozione margine con metodo di Shin (v5)
 )
 
 
@@ -276,30 +277,45 @@ def estimate_probabilities(fixtures: pd.DataFrame, stats: pd.DataFrame,
     df["p_market_raw"] = np.where(df["odds_num"] > 0, 1.0 / df["odds_num"], np.nan)
     df["p_market_fair"] = np.nan
 
-    # 1X2: rimuovi il margine normalizzando la terna per bookmaker.
-    # Solo se la terna è COMPLETA (3 esiti): normalizzare 2 esiti su 3
-    # produrrebbe probabilità implicite sbagliate.
+    # v5: il margine viene rimosso con il METODO DI SHIN, non per
+    # normalizzazione proporzionale. La normalizzazione proporzionale assume
+    # che il bookmaker spalmi il margine uniformemente, mentre lo concentra
+    # sugli outsider: il risultato è che i favoriti risultano sottostimati e
+    # gli outsider sovrastimati, in modo sistematico. Poiché p_market_fair è
+    # sia l'ancora del blend sia il benchmark del modello, quel bias
+    # inquinava entrambi.
+    def _fair_group(grp, min_len):
+        """Probabilità fair di un gruppo completo di esiti, o NaN."""
+        if len(grp) < min_len:
+            return None
+        inv = grp["p_market_raw"].to_numpy(dtype=float)
+        if not np.all(np.isfinite(inv)) or np.any(inv <= 0):
+            return None
+        p = _shin_probs(inv.tolist())
+        return p if p else None
+
+    # 1X2: solo se la terna è COMPLETA (3 esiti)
     mask_1x2 = df["_mkt_type"] == "1X2"
     for _, grp in df[mask_1x2].groupby(["date", "home", "away", "bookmaker"]):
-        s = grp["p_market_raw"].sum()
-        if len(grp) == 3 and s > 0:
-            df.loc[grp.index, "p_market_fair"] = grp["p_market_raw"] / s
+        p = _fair_group(grp, 3)
+        if p and len(grp) == 3:
+            df.loc[grp.index, "p_market_fair"] = p
 
-    # OU: normalizza per coppia over+under della STESSA LINEA (non per
-    # stringa market, che può differire tra "totals over"/"totals under").
+    # OU: coppia over+under della STESSA LINEA (non per stringa market,
+    # che può differire tra "totals over"/"totals under")
     mask_ou = df["_mkt_type"] == "OU"
     df["_line_key"] = pd.to_numeric(df["line"], errors="coerce").fillna(2.5)
     for _, grp in df[mask_ou].groupby(["date", "home", "away", "bookmaker", "_line_key"]):
-        s = grp["p_market_raw"].sum()
-        if len(grp) >= 2 and s > 0:
-            df.loc[grp.index, "p_market_fair"] = grp["p_market_raw"] / s
+        p = _fair_group(grp, 2)
+        if p and len(grp) == 2:
+            df.loc[grp.index, "p_market_fair"] = p
 
     # BTTS: coppia yes+no per bookmaker
     mask_btts = df["_mkt_type"] == "BTTS"
     for _, grp in df[mask_btts].groupby(["date", "home", "away", "bookmaker"]):
-        s = grp["p_market_raw"].sum()
-        if len(grp) >= 2 and s > 0:
-            df.loc[grp.index, "p_market_fair"] = grp["p_market_raw"] / s
+        p = _fair_group(grp, 2)
+        if p and len(grp) == 2:
+            df.loc[grp.index, "p_market_fair"] = p
 
     # Blend: p_hat = (1 - w)·modello + w·mercato   (w = MARKET_WEIGHT engine)
     w = MARKET_WEIGHT

@@ -23,7 +23,7 @@ import streamlit as st
 
 import storage
 import calibration
-from results_updater import update_results
+from results_updater import update_results, update_closing_odds
 from config import API_FOOTBALL_KEY
 
 # ============================================================
@@ -50,10 +50,44 @@ st.caption("Tracciamento e calibrazione dei pronostici del modello")
 # AGGIORNAMENTO RISULTATI
 # ============================================================
 cnt = storage.counts()
-m1, m2, m3 = st.columns(3)
-m1.metric("Pronostici totali", cnt["total"])
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Mercati salvati", cnt["total"],
+          help=f"Di cui {cnt['shortlisted']} effettivamente consigliati. "
+               f"Salvare anche i non consigliati serve a misurare la "
+               f"calibrazione su tutto il range di probabilità.")
 m2.metric("In attesa di esito", cnt["pending"])
 m3.metric("Chiusi", cnt["settled"])
+m4.metric("Con quota di chiusura", cnt["with_clv"],
+          help="Necessaria per il CLV, la metrica di edge più rapida da "
+               "accumulare.")
+
+# --- CLV: da lanciare vicino al calcio d'inizio ---
+with st.expander("Quote di chiusura (CLV)"):
+    st.caption(
+        "Il **Closing Line Value** confronta la quota che hai preso con "
+        "quella finale del mercato. È il segnale di edge più rapido: lo "
+        "yield ha bisogno di centinaia di esiti per staccarsi dal rumore, "
+        "il CLV dà indicazioni con 40-50 scommesse, perche misura il "
+        "confronto diretto con il mercato invece di passare attraverso "
+        "l'esito casuale della singola partita.\n\n"
+        "Va lanciato **poco prima del calcio d'inizio** delle partite di "
+        "oggi: è nell'ultima ora che il mercato incorpora formazioni e "
+        "ultime notizie. Usa la quota di The Odds API (quota separata da "
+        "API-Football).")
+    if st.button("Registra le quote di chiusura di oggi",
+                 use_container_width=True):
+        with st.spinner("Recupero quote…"):
+            res = update_closing_odds()
+        if res.get("error"):
+            st.error(res["error"])
+        elif res["updated"] == 0:
+            st.info("Nessuna quota di chiusura registrata "
+                    f"({res.get('pending_fixtures', 0)} partite in attesa). "
+                    "Normale se non ci sono partite di oggi già salvate.")
+        else:
+            st.success(f"{res['updated']} quote di chiusura registrate su "
+                       f"{res['fixtures']} partite.")
+        st.rerun()
 
 if cnt["pending"] > 0:
     st.caption(f"Aggiornare i risultati costa ~1-2 chiamate API per partita "
@@ -141,6 +175,26 @@ if settled.empty:
             "dopo il primo aggiornamento risultati su partite giocate.")
     st.stop()
 
+# v5: il database contiene TUTTI i mercati valutati, non solo i consigliati.
+# Sono due domande diverse e vanno tenute separate:
+#  - "il modello è calibrato?"  → serve tutto il campione, tutto il range
+#  - "i miei consigli rendono?" → solo i consigliati (shortlisted)
+# Mescolarli darebbe uno yield calcolato su scommesse che non avresti mai
+# fatto, e una calibrazione stimata solo sulla coda alta.
+scope = st.radio(
+    "Campione",
+    ["Solo consigliati", "Tutti i mercati valutati"],
+    horizontal=True,
+    help="Win rate e yield hanno senso solo sui consigliati (sono le "
+         "scommesse che avresti davvero piazzato). Calibrazione e Brier "
+         "sono più informativi su tutto il campione.")
+
+if "shortlisted" in settled.columns and scope == "Solo consigliati":
+    settled = settled[settled["shortlisted"].fillna(1) == 1].copy()
+    if settled.empty:
+        st.warning("Nessun pronostico consigliato ancora chiuso.")
+        st.stop()
+
 f1, f2, f3 = st.columns(3)
 with f1:
     markets = sorted(settled["market"].dropna().unique().tolist())
@@ -194,12 +248,48 @@ g4.metric("Brier score", f"{brier:.4f}",
           help="0 = probabilità perfette. Sotto 0.20 è buono per il calcio; "
                "0.25 equivale a dire sempre 50%.")
 
+# --- CLV: il segnale di edge più rapido ---
+# Nota: il CLV si calcola su TUTTI i pronostici con quota di chiusura, anche
+# quelli non ancora chiusi. Non dipende dall'esito, quindi non serve
+# aspettare che le partite finiscano.
+clv_src = df.copy()
+if "shortlisted" in clv_src.columns and scope == "Solo consigliati":
+    clv_src = clv_src[clv_src["shortlisted"].fillna(1) == 1]
+clv_rows = clv_src[clv_src["clv_pct"].notna()] if "clv_pct" in clv_src.columns \
+    else clv_src.iloc[0:0]
+
+if len(clv_rows) >= 10:
+    clv_mean = float(clv_rows["clv_pct"].mean())
+    clv_beat = float((clv_rows["clv_pct"] > 0).mean() * 100)
+    c1, c2 = st.columns(2)
+    c1.metric("CLV medio", f"{clv_mean:+.2f}%",
+              help="Quanto sei stato migliore (o peggiore) della linea di "
+                   "chiusura. Positivo e stabile = edge reale.")
+    c2.metric("Battuta la chiusura", f"{clv_beat:.0f}%",
+              help=f"Su {len(clv_rows)} scommesse con quota di chiusura "
+                   f"registrata. Sopra il 50% in modo stabile è il segnale "
+                   f"più affidabile che hai davvero un vantaggio.")
+    if clv_mean > 1.0:
+        st.caption("✅ CLV positivo: stai prendendo quote migliori di quelle "
+                   "finali. È il predittore di profittabilità più solido che "
+                   "esista, e arriva molto prima dello yield.")
+    elif clv_mean < -1.0:
+        st.caption("⚠️ CLV negativo: stai prendendo sistematicamente quote "
+                   "peggiori della chiusura. Uno yield positivo con CLV "
+                   "negativo è quasi sempre fortuna, non edge — non "
+                   "aumentare le puntate su quella base.")
+elif len(clv_rows) > 0:
+    st.caption(f"CLV: solo {len(clv_rows)} scommesse con quota di chiusura "
+               f"registrata, servono almeno 10 per un primo numero.")
+
 # --- Benchmark contro il mercato: il test che conta davvero ---
 if "prob_market" in flt.columns:
     bm = flt[flt["prob_market"].notna()].copy()
     if len(bm) >= 20:
         y = bm["won"].to_numpy()
-        b_model = float(np.mean((bm["prob"].to_numpy() / 100.0 - y) ** 2))
+        mcol = "prob_raw" if "prob_raw" in bm.columns else "prob"
+        bm[mcol] = bm[mcol].fillna(bm["prob"])
+        b_model = float(np.mean((bm[mcol].to_numpy() / 100.0 - y) ** 2))
         b_market = float(np.mean((bm["prob_market"].to_numpy() / 100.0 - y) ** 2))
         diff = b_model - b_market
         verdict = ("il modello batte il mercato" if diff < -0.002 else
@@ -225,16 +315,31 @@ st.caption("Ogni punto: pronostici raggruppati per probabilità dichiarata. "
            "Se il modello è calibrato, i punti stanno sulla diagonale. "
            "Sopra = il modello si sottostima, sotto = si sovrastima.")
 
-bins = np.arange(50, 101, 5)
-flt["bin"] = pd.cut(flt["prob"], bins=bins, right=False)
+# v5: si grafica prob_raw (ancorata ma NON calibrata), non prob.
+# Graficare prob significherebbe guardare il risultato DOPO la correzione:
+# la curva apparirebbe sulla diagonale per costruzione, nascondendo
+# esattamente l'errore che si vuole misurare.
+cal_col = "prob_raw" if "prob_raw" in flt.columns else "prob"
+flt[cal_col] = flt[cal_col].fillna(flt["prob"])
+
+# Le fasce partono da 0: il database ora contiene anche i mercati non
+# consigliati, quindi l'intero range è osservabile.
+lo = int(max(0, np.floor(flt[cal_col].min() / 5) * 5))
+bins = np.arange(lo, 101, 5)
+flt["bin"] = pd.cut(flt[cal_col], bins=bins, right=False)
 cal = flt.groupby("bin", observed=True).agg(
-    n=("won", "size"), pred=("prob", "mean"), real=("won", "mean")
+    n=("won", "size"), pred=(cal_col, "mean"), real=("won", "mean")
 ).reset_index()
 cal = cal[cal["n"] >= 5]  # niente punti su gruppi minuscoli
 cal["real"] *= 100
 
+if cal_col == "prob_raw":
+    st.caption("La curva usa le probabilità **non calibrate**: graficare "
+               "quelle già corrette le metterebbe sulla diagonale per "
+               "costruzione, nascondendo l'errore da misurare.")
+
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=[50, 100], y=[50, 100], mode="lines",
+fig.add_trace(go.Scatter(x=[lo, 100], y=[lo, 100], mode="lines",
                          line=dict(color="#484f58", dash="dot"),
                          name="Calibrazione perfetta", hoverinfo="skip"))
 if not cal.empty:
@@ -307,8 +412,22 @@ st.dataframe(breakdown(flt, "league"), hide_index=True,
 # ============================================================
 if "engine" in flt.columns and flt["engine"].nunique() > 1:
     st.markdown("#### Confronto engine (A/B)")
-    st.caption("v4 = strength da medie stagionali · dc = fit Dixon-Coles "
-               "con decadimento temporale. Il Brier più basso vince.")
+    st.caption("v4 = strength da medie stagionali · dc = fit Dixon-Coles con "
+               "decadimento temporale e ξ scelto per validazione fuori "
+               "campione. Il **Brier** è la colonna che decide: win rate e "
+               "yield dipendono da quali scommesse ciascun motore ha "
+               "proposto, il Brier misura la qualità delle probabilità a "
+               "parità di partite.")
+    st.caption("Da v5 i μ del Dixon-Coles ricevono lo stesso shrinkage "
+               "James-Stein della v4. Prima non era così: il DC produceva "
+               "probabilità più estreme, superava le soglie più spesso e "
+               "generava più pronostici, quindi il confronto misurava "
+               "insieme accuratezza e aggressività. Ora la differenza "
+               "residua è attribuibile al modello.")
+
+    ab_col = "prob_raw" if "prob_raw" in flt.columns else "prob"
+    flt[ab_col] = flt[ab_col].fillna(flt["prob"])
+
     ab_rows = []
     for eng, grp in flt.groupby("engine"):
         wo_e = grp[grp["odds"].notna() & (grp["odds"] > 1)]
@@ -316,11 +435,23 @@ if "engine" in flt.columns and flt["engine"].nunique() > 1:
         if not wo_e.empty:
             pr_e = np.where(wo_e["status"] == "won", wo_e["odds"] - 1.0, -1.0)
             yld_e = pr_e.sum() / len(wo_e) * 100
+        # Brier del mercato sulle STESSE righe: dice se quel motore batte il
+        # mercato, non solo se batte l'altro motore. Due motori possono
+        # essere entrambi peggiori del mercato.
+        bm_e = grp[grp["prob_market"].notna()] if "prob_market" in grp.columns \
+            else grp.iloc[0:0]
+        brier_mkt = (float(np.mean((bm_e["prob_market"] / 100.0 - bm_e["won"]) ** 2))
+                     if len(bm_e) >= 20 else None)
+        clv_e = (float(grp["clv_pct"].mean())
+                 if "clv_pct" in grp.columns and grp["clv_pct"].notna().any()
+                 else None)
         ab_rows.append({
             "Engine": eng,
             "N": len(grp),
             "Win rate": grp["won"].mean() * 100,
-            "Brier": float(np.mean((grp["prob"] / 100.0 - grp["won"]) ** 2)),
+            "Brier": float(np.mean((grp[ab_col] / 100.0 - grp["won"]) ** 2)),
+            "Brier mercato": brier_mkt,
+            "CLV": clv_e,
             "Yield": yld_e,
         })
     st.dataframe(pd.DataFrame(ab_rows), hide_index=True,
@@ -328,6 +459,12 @@ if "engine" in flt.columns and flt["engine"].nunique() > 1:
                  column_config={
                      "Win rate": st.column_config.NumberColumn(format="%.1f%%"),
                      "Brier": st.column_config.NumberColumn(format="%.4f"),
+                     "Brier mercato": st.column_config.NumberColumn(
+                         format="%.4f",
+                         help="Brier delle quote sharp sulle stesse partite. "
+                              "Se la colonna Brier non scende sotto questa, "
+                              "il motore non ha edge."),
+                     "CLV": st.column_config.NumberColumn(format="%+.2f%%"),
                      "Yield": st.column_config.NumberColumn(format="%+.1f%%"),
                  })
     min_n = min(r["N"] for r in ab_rows)

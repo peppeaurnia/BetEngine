@@ -17,6 +17,17 @@ USO (da terminale, NON dall'app — il fit costa chiamate API e CPU):
     python dc_model.py fit 135          # fitta la Serie A
     python dc_model.py fit-all          # fitta tutte le leghe (≈2 chiamate/lega)
     python dc_model.py show 135         # mostra i rating della Serie A
+    python dc_model.py fit-all --no-tune  # salta la scelta di ξ (più veloce)
+
+v5: ξ (il tasso di decadimento temporale) NON è più un numero fissato a mano.
+Viene scelto per validazione temporale — fit sulle partite più vecchie,
+log-verosimiglianza misurata sulle più recenti mai viste — perché era il
+parametro più influente del modello ed era l'unico rimasto arbitrario.
+Il tuning aggiunge ~30-60 secondi per lega, zero chiamate API.
+
+v5: i μ del Dixon-Coles ricevono lo stesso shrinkage James-Stein del motore
+v4. Senza, i due motori avevano "sharpness" diverse e il confronto A/B
+misurava l'aggressività invece dell'accuratezza.
 
 I parametri vengono salvati in dc_params.json. L'app li carica se esistono
 e non sono più vecchi di MAX_AGE_DAYS: in quel caso i mercati GOL vengono
@@ -42,7 +53,7 @@ from scipy.stats import poisson
 
 from probability_engine import (calculate_1x2, calculate_over_under,
                                 calculate_btts, calculate_exact_scores,
-                                MAX_GOALS)
+                                MAX_GOALS, MU_SHRINK)
 
 BASE_URL = "https://v3.football.api-sports.io"
 PARAMS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -118,7 +129,8 @@ def _tau(x, y, lam, mu, rho):
     return 1.0
 
 
-def fit_dixon_coles(matches: list, xi: float = XI) -> Optional[dict]:
+def fit_dixon_coles(matches: list, xi: float = XI,
+                    as_of: date = None) -> Optional[dict]:
     """
     Massima verosimiglianza pesata:
       L = Σ w_i · [log τ + log Pois(hg; λ_i) + log Pois(ag; μ_i)]
@@ -138,11 +150,11 @@ def fit_dixon_coles(matches: list, xi: float = XI) -> Optional[dict]:
     names = {}
     counts = {t: 0 for t in teams}
 
-    today = date.today()
+    ref_day = as_of or date.today()
     rows = []
     for m in matches:
         d = datetime.strptime(m["date"], "%Y-%m-%d").date()
-        days = (today - d).days
+        days = (ref_day - d).days
         w = float(np.exp(-xi * max(days, 0)))
         rows.append((t_idx[m["home_id"]], t_idx[m["away_id"]],
                      m["hg"], m["ag"], w))
@@ -198,11 +210,22 @@ def fit_dixon_coles(matches: list, xi: float = XI) -> Optional[dict]:
     dfc = res.x[n:2 * n]
     gamma, rho = float(res.x[2 * n]), float(res.x[2 * n + 1])
 
+    # Medie di lega implicite dal fit. Servono per applicare al DC lo STESSO
+    # shrinkage James-Stein del motore v4: senza, i due motori hanno una
+    # "sharpness" diversa e il confronto A/B nella pagina Performance misura
+    # insieme accuratezza e aggressività, che sono cose diverse.
+    lam_fit = np.exp(att[hi] + dfc[ai] + gamma)
+    mu_fit = np.exp(att[ai] + dfc[hi])
+    league_mu_home = float(np.average(lam_fit, weights=w))
+    league_mu_away = float(np.average(mu_fit, weights=w))
+
     return {
         "fitted_at": datetime.now().isoformat(timespec="seconds"),
         "xi": xi,
         "home_adv": round(gamma, 4),
         "rho": round(rho, 4),
+        "league_mu_home": round(league_mu_home, 4),
+        "league_mu_away": round(league_mu_away, 4),
         "n_matches": len(matches),
         "neg_ll": round(float(res.fun), 2),
         "teams": {
@@ -214,6 +237,89 @@ def fit_dixon_coles(matches: list, xi: float = XI) -> Optional[dict]:
             } for t in teams
         },
     }
+
+
+# ============================================================
+# SCELTA DI ξ PER VALIDAZIONE FUORI CAMPIONE
+# ============================================================
+# ξ governa quanto in fretta il modello dimentica il passato ed è il
+# parametro più influente dell'intero fit: troppo basso e il modello resta
+# ancorato a una squadra che non esiste più, troppo alto e insegue il rumore
+# delle ultime due giornate.
+#
+# La v4 lo aveva fissato a 0.0019 (emivita ~1 anno) senza alcuna evidenza.
+# Non serve indovinarlo: le partite sono già tutte in memoria durante il fit,
+# quindi si può sceglierlo per validazione temporale — si fitta sulle prime
+# partite e si misura la log-verosimiglianza sulle ULTIME, mai viste. È il
+# criterio corretto, perché è esattamente il compito che il modello deve
+# svolgere in produzione: prevedere partite future.
+
+XI_GRID = [0.0008, 0.0015, 0.0022, 0.0030, 0.0040, 0.0055, 0.0075]
+
+
+def _eval_loglik(params: dict, matches: list) -> Optional[float]:
+    """
+    Log-verosimiglianza media (per partita) di un insieme di partite sotto i
+    parametri dati. NON pesata: qui non stiamo stimando, stiamo valutando.
+    Le partite con squadre assenti dal fit vengono saltate.
+    """
+    teams = params["teams"]
+    gamma, rho = params["home_adv"], params["rho"]
+    tot, cnt = 0.0, 0
+    for m in matches:
+        th = teams.get(str(m["home_id"]))
+        ta = teams.get(str(m["away_id"]))
+        if not th or not ta:
+            continue
+        lam = float(np.clip(np.exp(th["att"] + ta["def"] + gamma), 1e-6, 8.0))
+        mu = float(np.clip(np.exp(ta["att"] + th["def"]), 1e-6, 8.0))
+        hg, ag = m["hg"], m["ag"]
+        ll = float(poisson.logpmf(hg, lam) + poisson.logpmf(ag, mu))
+        ll += float(np.log(max(_tau(hg, ag, lam, mu, rho), 1e-9)))
+        if np.isfinite(ll):
+            tot += ll
+            cnt += 1
+    return tot / cnt if cnt else None
+
+
+def tune_xi(matches: list, grid: list = None,
+            holdout_frac: float = 0.2) -> tuple:
+    """
+    Sceglie ξ massimizzando la log-verosimiglianza fuori campione.
+
+    Split TEMPORALE (non casuale): si allena sulle partite più vecchie e si
+    valuta sulle più recenti. Uno split casuale farebbe leakage — il modello
+    vedrebbe il futuro di una squadra mentre ne prevede il passato.
+
+    Returns: (xi_migliore, [(xi, loglik), ...])
+    """
+    grid = grid or XI_GRID
+    ordered = sorted(matches, key=lambda m: m["date"])
+    if len(ordered) < 200:
+        return XI, []
+
+    cut = int(len(ordered) * (1 - holdout_frac))
+    train, valid = ordered[:cut], ordered[cut:]
+    if not valid:
+        return XI, []
+
+    # "Oggi" per il training è il giorno dello split: è ciò che il modello
+    # avrebbe saputo al momento di fare quelle previsioni.
+    split_day = datetime.strptime(train[-1]["date"], "%Y-%m-%d").date()
+
+    results = []
+    for xi in grid:
+        params = fit_dixon_coles(train, xi=xi, as_of=split_day)
+        if not params:
+            continue
+        ll = _eval_loglik(params, valid)
+        if ll is not None:
+            results.append((xi, ll))
+
+    if not results:
+        return XI, []
+    best_xi = max(results, key=lambda r: r[1])[0]
+    return best_xi, results
 
 
 # ============================================================
@@ -291,6 +397,21 @@ def dc_match_probabilities(league_id: int, home_id: int,
     gamma, rho = p["home_adv"], p["rho"]
     mu_home = float(np.exp(th["att"] + ta["def"] + gamma))
     mu_away = float(np.exp(ta["att"] + th["def"]))
+
+    # === PARITÀ DI SHRINKAGE CON IL MOTORE v4 ===
+    # I μ del DC sono stime di massima verosimiglianza grezze; quelli della v4
+    # passano per uno shrinkage James-Stein verso la media di lega (MU_SHRINK).
+    # Lasciarli disallineati significa che il DC produce probabilità più
+    # estreme, supera le soglie più spesso e genera più pronostici: il
+    # confronto A/B finirebbe per misurare quale motore è più AGGRESSIVO
+    # invece di quale è più ACCURATO. Applicando lo stesso shrinkage, la
+    # differenza residua è attribuibile al modello.
+    lmh = p.get("league_mu_home")
+    lma = p.get("league_mu_away")
+    if lmh and lma:
+        mu_home = lmh + MU_SHRINK * (mu_home - lmh)
+        mu_away = lma + MU_SHRINK * (mu_away - lma)
+
     mu_home = float(np.clip(mu_home, 0.15, 4.5))
     mu_away = float(np.clip(mu_away, 0.15, 4.5))
 
@@ -335,7 +456,7 @@ def _current_seasons() -> list:
     return [y - 1, y]
 
 
-def _fit_league(api_key: str, league_id: int):
+def _fit_league(api_key: str, league_id: int, tune: bool = True):
     seasons = _current_seasons()
     print(f"→ Lega {league_id}: scarico stagioni {seasons}…")
     matches = fetch_league_matches(api_key, league_id, seasons)
@@ -343,11 +464,24 @@ def _fit_league(api_key: str, league_id: int):
     if len(matches) < 100:
         print("  ⚠️ Troppo poche partite, salto il fit.")
         return
-    params = fit_dixon_coles(matches)
+
+    xi = XI
+    if tune:
+        print("  Scelta di ξ per validazione temporale…")
+        xi, results = tune_xi(matches)
+        for x, ll in results:
+            flag = " ←" if x == xi else ""
+            print(f"    ξ={x:.4f}  logLik out-of-sample={ll:.4f}{flag}")
+        if results:
+            hl = np.log(2) / xi
+            print(f"  ξ scelto: {xi:.4f} (emivita ≈ {hl:.0f} giorni)")
+
+    params = fit_dixon_coles(matches, xi=xi)
     if params:
         save_league_params(league_id, params)
         print(f"  ✅ Fit ok: γ(casa)={params['home_adv']}, ρ={params['rho']}, "
-              f"{len(params['teams'])} squadre → dc_params.json")
+              f"ξ={params['xi']:.4f}, {len(params['teams'])} squadre "
+              f"→ dc_params.json")
 
 
 def main():
@@ -358,11 +492,12 @@ def main():
     from config import API_FOOTBALL_KEY
 
     cmd = sys.argv[1]
+    tune = "--no-tune" not in sys.argv   # tuning attivo di default
     if cmd == "fit":
-        _fit_league(API_FOOTBALL_KEY, int(sys.argv[2]))
+        _fit_league(API_FOOTBALL_KEY, int(sys.argv[2]), tune=tune)
     elif cmd == "fit-all":
         for lid in LEAGUE_IDS:
-            _fit_league(API_FOOTBALL_KEY, lid)
+            _fit_league(API_FOOTBALL_KEY, lid, tune=tune)
     elif cmd == "show":
         p = _load_all().get(sys.argv[2])
         if not p:

@@ -14,11 +14,14 @@ requests>=2.31.0
 # Visualizations
 plotly>=5.18.0
 
-# Excel tracking
+# Excel export (opzionale)
 openpyxl>=3.1.0
 
 # Environment variables (optional, for local development)
 python-dotenv>=1.0.0
 
+# Fuzzy matching nomi squadre (backtest batch)
 rapidfuzz>=3.0.0
+
+# Ottimizzazione MLE Dixon-Coles + tuning di xi
 scipy>=1.10.0

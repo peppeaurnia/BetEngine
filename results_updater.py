@@ -131,6 +131,64 @@ def determine_outcome(selection_code: str, home_goals: int, away_goals: int,
     return None
 
 
+def update_closing_odds(max_fixtures: int = 25) -> Dict:
+    """
+    Registra la quota di CHIUSURA dei pronostici delle partite di oggi e
+    calcola il CLV (Closing Line Value).
+
+    Perché conta più di tutto il resto all'inizio: lo yield ha bisogno di
+    centinaia di esiti prima di distinguersi dal rumore, il Brier di almeno
+    un centinaio. Il CLV no — è una misura diretta del confronto tra la tua
+    stima e quella finale del mercato, e con 40-50 scommesse dà già un
+    segnale leggibile. Se batti sistematicamente la linea di chiusura hai un
+    edge, quasi indipendentemente da come sono andati i singoli risultati.
+
+    Va lanciato VICINO AL CALCIO D'INIZIO (l'ultima ora è quella che conta:
+    è lì che il mercato incorpora formazioni e ultime notizie).
+
+    Costo: chiamate a The Odds API (quota separata da API-Football),
+    1 per fixture. `max_fixtures` fa da tetto.
+    """
+    try:
+        from odds_api import fetch_closing_odds_map
+    except ImportError:
+        return {"updated": 0, "fixtures": 0, "error": "odds_api non disponibile"}
+
+    today = date.today().isoformat()
+    rows = storage.predictions_awaiting_closing_odds(today)
+    if not rows:
+        return {"updated": 0, "fixtures": 0, "error": None}
+
+    # Raggruppa per fixture: una sola chiamata copre tutte le sue selezioni
+    by_fixture: Dict[int, list] = {}
+    for r in rows:
+        fid = r.get("fixture_id")
+        if fid:
+            by_fixture.setdefault(int(fid), []).append(r)
+
+    updated = 0
+    fixtures_done = 0
+    for fid, preds in list(by_fixture.items())[:max_fixtures]:
+        ref = preds[0]
+        try:
+            closing = fetch_closing_odds_map(ref.get("home", ""),
+                                             ref.get("away", ""),
+                                             ref.get("league_id"))
+        except Exception:
+            continue
+        fixtures_done += 1
+        if not closing:
+            continue
+        for p in preds:
+            code = p.get("selection_code")
+            if code in closing:
+                storage.set_closing_odds(p["id"], float(closing[code]))
+                updated += 1
+
+    return {"updated": updated, "fixtures": fixtures_done,
+            "pending_fixtures": len(by_fixture), "error": None}
+
+
 def update_results(api_key: str, max_api_calls: int = 40) -> Dict:
     """
     Chiude i pronostici pendenti recuperando gli esiti via API.
