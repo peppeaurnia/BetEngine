@@ -776,6 +776,17 @@ def calculate_match_probabilities(home_stats: Dict, away_stats: Dict,
         "mu_away": round(mu_away, 3),
         "lambda3": round(lambda3, 4),
         "total_expected_goals": round(mu_home + mu_away, 2),
+        # Il calcio produce 2.5-2.8 gol per partita; nessun accoppiamento
+        # realistico scende sotto ~2.0 di gol attesi totali. Se ci si arriva,
+        # le strength in ingresso sono degeneri: statistiche di stagione quasi
+        # vuote, neopromosse, o piano API che non copre la stagione corrente.
+        # In quel caso le probabilità non descrivono la partita.
+        #
+        # Nota: il floor MIN_TOTAL_MU agisce dentro calculate_expected_goals,
+        # ma gli aggiustamenti H2H e tiri vengono DOPO e possono riportare il
+        # totale sotto quella soglia. Per questo il controllo va fatto qui,
+        # sui μ finali, e non sul floor.
+        "mu_implausible": bool(mu_home + mu_away < 2.0),
         
         # Aggiustamenti applicati (per debug/trasparenza)
         "h2h_adj_home": round(h2h_adj_home, 3),

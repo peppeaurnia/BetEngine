@@ -289,8 +289,17 @@ def ou_dataframe(probs, lines, over_fmt, under_fmt):
 # sanità, per non inseguire code dove il modello è inaffidabile.
 MIN_EV_PCT = 4.0        # EV minimo per consigliare (copre l'errore di stima)
 MIN_PROB_SANITY = 22.0  # sotto questa probabilità il modello è troppo rumoroso
+MAX_PROB_SANITY = 90.0  # sopra questa probabilità il modello non è utilizzabile
+MIN_ODDS = 1.20         # sotto questa quota il rendimento non paga il rischio
 MAX_ODDS = 8.0          # niente longshot: varianza enorme, stime pessime
 MAX_SHORTLIST = 3
+
+# Perché un TETTO alla probabilità e non solo un pavimento:
+# a probabilità estreme l'errore di stima domina il margine. Se il modello
+# dice 97% e la verità è 94%, a quota 1.06 l'EV passa da +2.8% a −0.4%: tre
+# punti di errore, che su un campione piccolo sono nulla, ribaltano il segno.
+# Le scommesse quasi certe sono le PIÙ sensibili alla calibrazione, non le
+# meno. Inoltre nessun bookmaker quota davvero il fair 1.03 di un 97%.
 
 # Staking: Kelly frazionario. Kelly pieno è ottimale solo se le probabilità
 # sono ESATTE; con probabilità stimate porta a rovina. Un quarto di Kelly con
@@ -301,6 +310,15 @@ KELLY_CAP = 0.02        # mai più del 2% del bankroll su una singola giocata
 # Soglie di fallback, usate SOLO quando non ci sono quote e quindi l'EV non
 # è calcolabile. In quel caso l'app lo dichiara esplicitamente.
 FALLBACK_TH = {"1X2": 55.0, "OU": 65.0, "BTTS": 65.0, "Cards": 78.0}
+
+# In fallback si valutano SOLO le linee centrali. La v5 calcola molte più
+# linee della v4 (O/U 1.5-4.5, cartellini 2.5-6.5) perché servono al database
+# per la calibrazione, ma senza quote un ordinamento per probabilità pesca
+# meccanicamente le linee più estreme — "Under 4.5 al 96%", "Cartellini U6.5
+# al 98%" — che sono quasi-certezze prive di qualunque valore: il bookmaker
+# le paga 1.01 quando le paga. Sono buone come dato, inutili come consiglio.
+FALLBACK_CODES = {"1", "X", "2", "O2.5", "U2.5", "GG", "NG",
+                  "O3.5cards", "U3.5cards", "O4.5cards", "U4.5cards"}
 
 
 def _fair_market_prob(short, odds_data):
@@ -438,13 +456,14 @@ def select_shortlist(candidates):
     if with_odds:
         eligible = [c for c in with_odds
                     if c["ev_pct"] >= MIN_EV_PCT
-                    and c["p_ev"] >= MIN_PROB_SANITY
-                    and c["odds"] <= MAX_ODDS]
+                    and MIN_PROB_SANITY <= c["p_ev"] <= MAX_PROB_SANITY
+                    and MIN_ODDS <= c["odds"] <= MAX_ODDS]
         key = lambda c: -c["ev_pct"]
         mode = "ev"
     else:
         eligible = [c for c in candidates
-                    if c["prob"] >= FALLBACK_TH.get(c["mt"], 70.0)]
+                    if c["short"] in FALLBACK_CODES
+                    and FALLBACK_TH.get(c["mt"], 70.0) <= c["prob"] <= MAX_PROB_SANITY]
         key = lambda c: -c["prob"]
         mode = "prob"
 
@@ -547,9 +566,15 @@ def show_top_preds(preds, mode="ev"):
 
     if mode == "ev":
         st.caption(f"Selezione per valore atteso (EV ≥ {MIN_EV_PCT:.0f}%, "
-                   f"probabilità ≥ {MIN_PROB_SANITY:.0f}%, quota ≤ {MAX_ODDS:.0f}). "
+                   f"probabilità tra {MIN_PROB_SANITY:.0f}% e {MAX_PROB_SANITY:.0f}%, "
+                   f"quota tra {MIN_ODDS:.2f} e {MAX_ODDS:.0f}). "
                    f"Puntata suggerita: {KELLY_FRACTION:.0%} di Kelly, "
                    f"tetto {KELLY_CAP:.0%} del bankroll.")
+    else:
+        st.caption(f"Senza quote si valutano solo le linee centrali "
+                   f"(1X2, O/U 2.5, BTTS, cartellini 3.5-4.5) e si scarta "
+                   f"tutto sopra il {MAX_PROB_SANITY:.0f}%: una quasi-certezza "
+                   f"non è un pronostico utile, il bookmaker la paga 1.01.")
 
 
 # ============================================================
@@ -771,11 +796,34 @@ def show_analysis(fix, lid, lname):
 
         show_top_preds(top_preds, sel_mode)
 
+        if pr.get("mu_implausible"):
+            st.error(
+                "**Dati di squadra insufficienti.** Il modello prevede "
+                f"{pr['total_expected_goals']:.2f} gol totali, contro una "
+                "media reale di 2.5-2.8: nessun accoppiamento realistico "
+                "scende così in basso. Le strength in ingresso sono degeneri "
+                "— statistiche di stagione quasi vuote, squadre neopromosse, "
+                "o piano API che non copre la stagione corrente.\n\n"
+                "Conseguenza pratica: tutti gli Under risultano altissimi per "
+                "artefatto, non per analisi. **Ignora i numeri di questa "
+                "pagina** finché le squadre non hanno almeno 6-8 partite "
+                "giocate nella stagione corrente.")
+
         if sel_mode == "prob":
-            st.warning("Nessuna quota disponibile per questa partita: l'EV non "
-                       "è calcolabile e la selezione ripiega sulle vecchie "
-                       "soglie di probabilità. Trattali come opinioni del "
-                       "modello, non come scommesse di valore.")
+            n_books = data.get("n_books", 0)
+            why = ("The Odds API non ha restituito nessun bookmaker per questa "
+                   "partita" if n_books == 0 else
+                   f"trovati {n_books} bookmaker ma nessuna quota utilizzabile")
+            st.warning(
+                f"**Nessuna quota disponibile** ({why}): l'EV non è "
+                "calcolabile e la selezione ripiega sulle soglie di "
+                "probabilità. Trattali come opinioni del modello, non come "
+                "scommesse di valore — senza prezzo non esiste il concetto di "
+                "valore.\n\n"
+                "Cause tipiche: partita troppo lontana o troppo vicina al "
+                "fischio d'inizio, lega non mappata in `odds_api.LEAGUE_MAPPING`, "
+                "quota mensile di The Odds API esaurita, o nomi squadra che non "
+                "combaciano. Esegui `python diagnose_odds.py` per capire quale.")
         if calibration.is_active():
             st.caption("Probabilità corrette con la calibrazione empirica "
                        "(pagina Performance per i dettagli).")
