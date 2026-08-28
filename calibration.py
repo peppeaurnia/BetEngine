@@ -131,6 +131,18 @@ def fit_and_save() -> dict:
     df = storage.all_predictions_df()
     settled = df[df["status"].isin(["won", "lost"])].copy()
 
+    # v5.2: fuori le righe marcate `degraded`. Sono previsioni prodotte con
+    # statistiche di squadra degeneri (inizio stagione, neopromosse, piano API
+    # che non copre la stagione corrente): il modello lì non sbaglia in modo
+    # correggibile, sbaglia perché non ha dati. Includerle insegna alla curva
+    # una relazione media tra due regimi diversi, che non descrive né l'uno
+    # né l'altro — e peggiora le correzioni proprio quando i dati tornano
+    # buoni. Restano nel database, semplicemente non fanno testo qui.
+    n_degraded = 0
+    if "degraded" in settled.columns:
+        n_degraded = int((settled["degraded"].fillna(0) == 1).sum())
+        settled = settled[settled["degraded"].fillna(0) != 1]
+
     # v5: il fit gira su prob_raw (ancorata, NON calibrata). Se manca si
     # ripiega su prob solo per le righe vecchie migrate, dove coincidono.
     if "prob_raw" not in settled.columns:
@@ -140,7 +152,8 @@ def fit_and_save() -> dict:
 
     n = len(settled)
     result = {"fitted_at": datetime.now().isoformat(timespec="seconds"),
-              "n_settled": n, "global": {}, "per_market": {},
+              "n_settled": n, "n_degraded_excluded": n_degraded,
+              "global": {}, "per_market": {},
               "market_weight": None, "market_weight_n": 0,
               "fit_column": "prob_raw",
               "active": False}
@@ -284,12 +297,14 @@ def status() -> dict:
     """Stato leggibile per la pagina Performance."""
     cal = load()
     if not cal:
-        return {"active": False, "n_settled": 0, "fitted_at": None,
+        return {"active": False, "n_settled": 0, "n_degraded_excluded": 0,
+                "fitted_at": None,
                 "per_market": [], "market_weight": None,
                 "market_weight_n": 0, "min_required": MIN_SAMPLE_GLOBAL,
                 "brier_model_only": None, "brier_market_only": None}
     return {"active": cal.get("active", False),
             "n_settled": cal.get("n_settled", 0),
+            "n_degraded_excluded": cal.get("n_degraded_excluded", 0),
             "fitted_at": cal.get("fitted_at"),
             "per_market": sorted(cal.get("per_market", {}).keys()),
             "market_weight": cal.get("market_weight"),

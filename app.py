@@ -621,7 +621,8 @@ def show_team_stats(stats, name, is_home):
 
 def build_tracker_rows(all_candidates, shortlist, fix, lid, lname, hd, ad,
                        anchored, engine="v4", sharp_book=None,
-                       market_source=None):
+                       market_source=None, mu_total=None, data_quality=None,
+                       degraded=False):
     """
     Costruisce le righe da salvare su SQLite (solo su richiesta esplicita).
 
@@ -664,6 +665,11 @@ def build_tracker_rows(all_candidates, shortlist, fix, lid, lname, hd, ad,
             "odds": _r(pred.get("odds"), 2),
             "ev_pct": _r(pred.get("ev_pct")),
             "kelly_frac": pred.get("kelly_frac"),
+            # Contesto di qualità: senza, a stagione avanzata non c'è modo di
+            # distinguere una previsione da 2 partite di storico da una da 20.
+            "mu_total": mu_total,
+            "data_quality": data_quality,
+            "degraded": degraded,
             "stars": pred.get("stars", 0),
             "shortlisted": 1 if pred.get("short") in short_codes else 0,
             "anchored": anchored,
@@ -940,7 +946,10 @@ def show_analysis(fix, lid, lname):
                 rows = build_tracker_rows(
                     all_cands, top_preds, fix, lid, lname, hd, ad, anchored,
                     engine=engine_used, sharp_book=data.get("sharp_book"),
-                    market_source=market_source)
+                    market_source=market_source,
+                    mu_total=pr.get("total_expected_goals"),
+                    data_quality=q.get("score"),
+                    degraded=bool(pr.get("mu_implausible")))
                 n_saved = storage.save_predictions(rows)
                 st.success(f"{n_saved} mercati salvati ({len(top_preds)} "
                            f"consigliati). Statistiche ed export nella "
@@ -948,6 +957,11 @@ def show_analysis(fix, lid, lname):
             st.caption("Vengono salvati tutti i mercati, non solo i consigliati: "
                        "serve a misurare la calibrazione su tutto il range di "
                        "probabilità invece che sulla sola coda alta.")
+            if pr.get("mu_implausible"):
+                st.caption("⚠️ Queste righe verranno marcate `degraded`: "
+                           "restano nel database per l'analisi, ma sono "
+                           "escluse dal fit della calibrazione. Salvarle "
+                           "senza marcarle avvelenerebbe la curva.")
 
     # ------------------------------------------------ TAB MERCATI
     with tab_mkt:

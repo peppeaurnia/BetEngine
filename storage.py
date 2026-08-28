@@ -25,7 +25,16 @@ v5 — TRE CAMBIAMENTI STRUTTURALI
    Guadagno: 3-4x i dati, l'intero range di probabilità, e un confronto
    modello-vs-mercato onesto.
 
-3. Colonne per il CLV (`odds_close`, `clv_pct`)
+3. `mu_total`, `data_quality`, `degraded` (v5.2)
+   Una previsione fatta alla 2ª giornata, con due partite di storico, e una
+   fatta alla 25ª non sono lo stesso oggetto: la prima è quasi rumore. Senza
+   marcarle, la curva di calibrazione le mescola e impara una relazione media
+   che non descrive nessuno dei due regimi — e filtrare per data dopo non
+   funziona, perché i campionati partono in momenti diversi e le neopromosse
+   restano degeneri più a lungo. `degraded=1` marca le righe da tenere fuori
+   dal fit pur conservandole nel database.
+
+4. Colonne per il CLV (`odds_close`, `clv_pct`)
    Il Closing Line Value è il predittore più affidabile di profittabilità a
    lungo termine ed è misurabile in poche settimane, mentre lo yield richiede
    centinaia di esiti. Vedi results_updater.update_closing_odds().
@@ -56,6 +65,9 @@ _MIGRATIONS = [
     ("odds_close", "REAL"),
     ("clv_pct", "REAL"),
     ("kelly_frac", "REAL"),
+    ("mu_total", "REAL"),
+    ("data_quality", "INTEGER"),
+    ("degraded", "INTEGER DEFAULT 0"),
 ]
 
 
@@ -95,6 +107,9 @@ def init_db():
                 clv_pct        REAL,
                 ev_pct         REAL,
                 kelly_frac     REAL,
+                mu_total       REAL,
+                data_quality   INTEGER,
+                degraded       INTEGER DEFAULT 0,
                 stars          INTEGER,
                 shortlisted    INTEGER DEFAULT 1,
                 anchored       INTEGER DEFAULT 0,
@@ -152,9 +167,10 @@ def save_predictions(rows: list) -> int:
                 (created_at, match_date, fixture_id, league_id, league,
                  home, away, market, selection, selection_code,
                  prob, prob_raw, prob_pure, prob_market, odds, ev_pct,
-                 kelly_frac, stars, shortlisted, anchored, sharp_book,
+                 kelly_frac, mu_total, data_quality, degraded,
+                 stars, shortlisted, anchored, sharp_book,
                  market_source, engine)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 now, r.get("match_date"), r.get("fixture_id"),
                 r.get("league_id"), r.get("league"),
@@ -162,7 +178,10 @@ def save_predictions(rows: list) -> int:
                 r.get("selection"), r.get("selection_code"),
                 r.get("prob"), r.get("prob_raw"), r.get("prob_pure"),
                 r.get("prob_market"), r.get("odds"), r.get("ev_pct"),
-                r.get("kelly_frac"), r.get("stars"),
+                r.get("kelly_frac"), r.get("mu_total"),
+                r.get("data_quality"),
+                1 if r.get("degraded") else 0,
+                r.get("stars"),
                 1 if r.get("shortlisted") else 0,
                 1 if r.get("anchored") else 0,
                 r.get("sharp_book"), r.get("market_source"),
@@ -253,7 +272,8 @@ def counts() -> dict:
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
                 SUM(CASE WHEN status IN ('won','lost') THEN 1 ELSE 0 END) AS settled,
                 SUM(CASE WHEN shortlisted = 1 THEN 1 ELSE 0 END) AS shortlisted,
-                SUM(CASE WHEN clv_pct IS NOT NULL THEN 1 ELSE 0 END) AS with_clv
+                SUM(CASE WHEN clv_pct IS NOT NULL THEN 1 ELSE 0 END) AS with_clv,
+                SUM(CASE WHEN degraded = 1 THEN 1 ELSE 0 END) AS degraded
             FROM predictions
         """)
         row = cur.fetchone()
@@ -261,7 +281,8 @@ def counts() -> dict:
                 "pending": row["pending"] or 0,
                 "settled": row["settled"] or 0,
                 "shortlisted": row["shortlisted"] or 0,
-                "with_clv": row["with_clv"] or 0}
+                "with_clv": row["with_clv"] or 0,
+                "degraded": row["degraded"] or 0}
 
 
 def delete_all() -> int:
