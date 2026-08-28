@@ -738,6 +738,75 @@ def run_analysis(fix, lid, lname):
             "hs": hs, "aws": aws}
 
 
+# Codici per cui ha senso chiedere una quota a mano, con etichetta leggibile.
+# I cartellini ci sono anche se The Odds API non li espone MAI: sono
+# esattamente il mercato per cui l'inserimento manuale è indispensabile.
+MANUAL_ODDS_FIELDS = [
+    ("1", "1 (casa)"), ("X", "X (pari)"), ("2", "2 (trasferta)"),
+    ("O2.5", "Over 2.5"), ("U2.5", "Under 2.5"),
+    ("GG", "Gol"), ("NG", "NoGol"),
+    ("O3.5cards", "Cart. O3.5"), ("U3.5cards", "Cart. U3.5"),
+    ("O4.5cards", "Cart. O4.5"), ("U4.5cards", "Cart. U4.5"),
+]
+
+
+def manual_odds_input(fid):
+    """
+    Permette di inserire a mano le quote lette sul sito del bookmaker.
+
+    Perché serve: senza prezzo non esiste il concetto di valore. Un Under 2.5
+    al 73% ha quota equa 1.36; se il book paga 1.45 è un'ottima scommessa, se
+    paga 1.30 perdi soldi pur avendo ragione il 73% delle volte. Stessa
+    probabilità, decisioni opposte. Il numero del modello da solo non può
+    dire quale dei due casi sia.
+
+    Le quote non mancano davvero: le vedi tu quando vai a piazzare. Mancano
+    all'app. Questo form colma quel buco e riattiva l'intera pipeline —
+    EV, Kelly, benchmark contro il mercato, CLV.
+
+    Nota: inserisci le quote di UN SOLO bookmaker. Mischiare i massimi di
+    book diversi costruisce un book sintetico che nessuno ha mai quotato, e
+    le probabilità che se ne ricavano sono un artefatto (è precisamente il
+    bug corretto nella v5).
+
+    Returns: dict {codice: quota} con le sole quote effettivamente inserite.
+    """
+    key = f"manual_odds_{fid}"
+    saved = st.session_state.get(key, {})
+
+    with st.expander("Inserisci le quote a mano"
+                     + (f" · {len(saved)} inserite" if saved else "")):
+        st.caption(
+            "Copia le quote dal tuo bookmaker. Servono per calcolare l'EV: "
+            "lascia a 1.00 quello che non ti interessa. Usa **un solo "
+            "bookmaker**, non i massimi presi da siti diversi — quelli non "
+            "formano un book coerente e falsano le probabilità di mercato.")
+
+        with st.form(f"manual_form_{fid}"):
+            vals = {}
+            cols = st.columns(3)
+            for i, (code, label) in enumerate(MANUAL_ODDS_FIELDS):
+                with cols[i % 3]:
+                    vals[code] = st.number_input(
+                        label, min_value=1.00, max_value=100.0,
+                        value=float(saved.get(code, 1.00)),
+                        step=0.05, format="%.2f",
+                        key=f"mo_{fid}_{code}")
+            c1, c2 = st.columns(2)
+            submitted = c1.form_submit_button("Applica", use_container_width=True)
+            cleared = c2.form_submit_button("Azzera", use_container_width=True)
+
+        if cleared:
+            st.session_state[key] = {}
+            st.rerun()
+        if submitted:
+            # 1.00 = campo lasciato vuoto, non una quota reale
+            st.session_state[key] = {c: v for c, v in vals.items() if v > 1.01}
+            st.rerun()
+
+    return st.session_state.get(key, {})
+
+
 def show_analysis(fix, lid, lname):
     hd, ad = dn(fix["home_name"]), dn(fix["away_name"])
     fid = fix["fixture_id"]
@@ -755,13 +824,36 @@ def show_analysis(fix, lid, lname):
     h2h, hshots, ashots = data["h2h"], data["hshots"], data["ashots"]
     hs, aws = data["hs"], data["aws"]
 
+    # v5.1: le quote inserite a mano vanno lette PRIMA della barra, perché
+    # cambiano la fonte delle probabilità di mercato mostrata nel badge.
+    # Il form vero e proprio viene disegnato più sotto: scrive in
+    # session_state e fa rerun, quindi al giro successivo si trova qui.
+    manual = st.session_state.get(f"manual_odds_{fid}", {})
+    market_source = data.get("market_source")
+    if manual:
+        odds = {**odds, **manual}          # le manuali hanno la precedenza
+        if not anchored:
+            # pr non è mai stato ancorato (nessuna quota dall'API), quindi
+            # richiamare l'anchoring qui è sicuro: le chiavi "_pure" vengono
+            # create adesso per la prima volta, nessuna doppia applicazione.
+            # Le quote di un singolo book SONO un gruppo coerente, quindi
+            # sono utilizzabili anche per stimare le probabilità di mercato.
+            pr = apply_market_anchoring(pr, odds, sharp_odds=manual)
+            anchored = bool(pr.get("market_anchored"))
+            market_source = "manual"
+        if not sharp_odds:
+            sharp_odds = manual
+
     # --- Barra affidabilità (soglie allineate ai livelli di assess: 85/65) ---
     qcol = C_GOOD if q["score"] >= 85 else C_WARN if q["score"] >= 65 else C_BAD
     # v5: si dichiara DA DOVE arrivano le probabilità di mercato. Se non c'è
     # un book sharp il dato è di qualità inferiore e va detto, non nascosto.
-    src = data.get("market_source")
+    src = market_source
     book = data.get("sharp_book")
-    if anchored and src == "sharp":
+    if anchored and src == "manual":
+        anch = (f'<span class="be-badge" style="background:#1f6feb; margin-left:8px;">'
+                f'Quote inserite a mano</span>')
+    elif anchored and src == "sharp":
         anch = (f'<span class="be-badge" style="background:#1f6feb; margin-left:8px;">'
                 f'Ancorato · {book}</span>')
     elif anchored:
@@ -777,6 +869,9 @@ def show_analysis(fix, lid, lname):
         f'<span style="color:{C_TXT}; font-weight:600;">Affidabilità: {q["level"]}</span> '
         f'<span style="color:{C_MUT};">({q["score"]}%)</span>{anch}{eng_badge}</div>',
         unsafe_allow_html=True)
+
+    # Form di inserimento manuale: scrive in session_state e fa rerun.
+    manual_odds_input(fid)
 
     # v5: si valutano TUTTI i mercati, poi si seleziona per EV
     all_cands = evaluate_all_markets(pr, hd, ad, best_odds=odds,
@@ -817,13 +912,18 @@ def show_analysis(fix, lid, lname):
             st.warning(
                 f"**Nessuna quota disponibile** ({why}): l'EV non è "
                 "calcolabile e la selezione ripiega sulle soglie di "
-                "probabilità. Trattali come opinioni del modello, non come "
-                "scommesse di valore — senza prezzo non esiste il concetto di "
-                "valore.\n\n"
-                "Cause tipiche: partita troppo lontana o troppo vicina al "
-                "fischio d'inizio, lega non mappata in `odds_api.LEAGUE_MAPPING`, "
-                "quota mensile di The Odds API esaurita, o nomi squadra che non "
-                "combaciano. Esegui `python diagnose_odds.py` per capire quale.")
+                "probabilità.\n\n"
+                "**Inserisci le quote a mano** con il form qui sopra: le "
+                "vedi comunque sul sito del bookmaker quando vai a piazzare, "
+                "e bastano quelle a riattivare EV, Kelly e il confronto col "
+                "mercato. Senza prezzo non esiste il concetto di valore — un "
+                "Under 2.5 al 73% ha quota equa 1.36: a 1.45 è un'ottima "
+                "scommessa, a 1.30 perdi soldi pur avendo ragione il 73% "
+                "delle volte.\n\n"
+                "Se preferisci capire perché l'API non risponde: "
+                "`python diagnose_odds.py`. Cause tipiche: partita troppo "
+                "lontana dal fischio d'inizio, campionato non ancora attivo, "
+                "quota mensile esaurita, nomi squadra che non combaciano.")
         if calibration.is_active():
             st.caption("Probabilità corrette con la calibrazione empirica "
                        "(pagina Performance per i dettagli).")
@@ -840,7 +940,7 @@ def show_analysis(fix, lid, lname):
                 rows = build_tracker_rows(
                     all_cands, top_preds, fix, lid, lname, hd, ad, anchored,
                     engine=engine_used, sharp_book=data.get("sharp_book"),
-                    market_source=data.get("market_source"))
+                    market_source=market_source)
                 n_saved = storage.save_predictions(rows)
                 st.success(f"{n_saved} mercati salvati ({len(top_preds)} "
                            f"consigliati). Statistiche ed export nella "
